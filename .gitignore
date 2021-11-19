@@ -1,0 +1,16 @@
+# ignore backups
+*~
+
+# ignore locks
+.\#*
+
+# ignore merge files created by git.
+*.orig
+*.rej
+
+# ignore nested build directory
+/build*
+
+# ignore jottings
+notes
+notes.txt
