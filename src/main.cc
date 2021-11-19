@@ -188,15 +188,55 @@ int FindKeyboard (char const *wanted = nullptr)
 
 }
 
-
-int main (int, char *[])
+int main (int argc, char *argv[])
 {
-  // FIXME: set progName
-  // FIXME: read options
-  flagVerbose = true;
-  int keyFd = FindKeyboard (keyboardName);
+  if (auto const *pName = argv[0])
+    {
+      // set progName
+      if (auto *slash = strrchr (pName, '/'))
+	pName = slash + 1;
+      progName = pName;
+    }
+
+  int argno = 1;
+  for (; argno < argc; argno++)
+    {
+      auto const *arg = argv[argno];
+      if (arg[0] != '-')
+	break;
+      if (!strcmp (arg, "-v"))
+	flagVerbose = true;
+      else if (!strcmp (arg, "-h"))
+	; // FIXME: show help
+      else
+	{
+	  Inform ("unknown flag `%s'", arg);
+	  // FIXME: show help
+	  return 1;
+	}
+    }
+
+  char const *keyboard = keyboardName;
+  if (argno < argc)
+    keyboard = argv[argno++];
+
+  if (argno != argc)
+    {
+      Inform ("unknown argument `%s'", argv[argno]);
+      // FIXME: show help
+      return 1;
+    }
+
+  int keyFd = FindKeyboard (keyboard);
   if (keyFd < 0)
-    return 1;
+    {
+      bool usingDefault = keyboard == keyboardName;
+      Inform (usingDefault ? "cannot find keyboard%s%s"
+	      : "cannot find keyboard `%s'%s",
+	      usingDefault ? "" : keyboard,
+	      geteuid () ? " (not root, sudo?)" : "");
+      return 1;
+    }
   
   close (keyFd);
 
