@@ -189,12 +189,20 @@ int FindKeyboard (char const *wanted = nullptr)
 void Usage (FILE *stream = stderr)
 {
   fprintf (stream, R"(Keyboard Emulation of Mouse Buttons
-  Usage: %s [options] [inputkeyboard] [outputkeyboard]
+  Usage: %s [OPTIONS] [INPUTKEYBOARD] [OUTPUTDEVICE]
 
-If you have a buttonless trackpad, but really want mouse buttons, use
-  Win - mouse 1
-  Win + AltL - mouse 2
-  Win + AltR - mouse 3
+Emulate mouse buttons to OUTPUTDEVICE using INPUTDEVICE.
+
+MetaLeft (the window key) is the mouse button, with AltLeft and
+AltRight modifying it to buttons 2 & 3.  FIXME: Parameterize this.
+
+INPUTKEYBOARD defaults to a device in %s that reports key events and
+whose reported name ends with ` keyboard'.  You may provide either a
+pathname (absolute or relative to %s), or a string to partially match
+the reported device name.  Use `^' and `$' to anchor the string at the
+beginning and/or end of the reported name.
+
+OUTPUTDEVICE defaults to %s.
 
 Options:
   -h	Help
@@ -202,7 +210,7 @@ Options:
 
 Usually requires root privilege, as we muck about in /dev.
 
-)", progName);
+)", progName, inputDevDir, inputDevDir, uinputDev);
   fprintf (stream, "Version %s.\n", PROJECT_NAME " " PROJECT_VERSION);
   if (PROJECT_URL[0])
     fprintf (stream, "See %s for more information.\n", PROJECT_URL);
