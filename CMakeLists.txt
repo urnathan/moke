@@ -13,10 +13,21 @@ endif ()
 project (Wakame VERSION 1.0 LANGUAGES CXX)
 set (PROJECT_URL "https://github.com/urnathan/wakame")
 
+
 include (CheckLibraryExists)
 include (CheckSymbolExists)
 
 set (CMAKE_CXX_STANDARD 17)
+
+if (NOT CMAKE_BUILD_TYPE)
+  set (CMAKE_BUILD_TYPE Debug)
+endif ()
+message (NOTICE "Build type:${CMAKE_BUILD_TYPE}")
+
+# -g3 means we get macros
+set (CMAKE_CXX_FLAGS_DEBUG -g3)
+set (CMAKE_CXX_FLAGS_RELWITHDEBINFO
+  "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS_DEBUG}")
 
 add_compile_options ("-fdiagnostics-color=always;-fno-diagnostics-show-option")
 add_compile_options ("-W;-Wall")
