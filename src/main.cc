@@ -186,6 +186,27 @@ int FindKeyboard (char const *wanted = nullptr)
   return fd;
 }
 
+void Usage (FILE *stream = stderr)
+{
+  fprintf (stream, R"(Keyboard Emulation of Mouse Buttons
+  Usage: %s [options] [inputkeyboard] [outputkeyboard]
+
+If you have a buttonless trackpad, but really want mouse buttons, use
+  Win - mouse 1
+  Win + AltL - mouse 2
+  Win + AltR - mouse 3
+
+Options:
+  -h	Help
+  -v	Be verbose
+
+Usually requires root privilege, as we muck about in /dev.
+
+)", progName);
+  fprintf (stream, "Version %s.\n", PROJECT_NAME " " PROJECT_VERSION);
+  if (PROJECT_URL[0])
+    fprintf (stream, "See %s for more information.\n", PROJECT_URL);
+}
 }
 
 int main (int argc, char *argv[])
@@ -207,11 +228,14 @@ int main (int argc, char *argv[])
       if (!strcmp (arg, "-v"))
 	flagVerbose = true;
       else if (!strcmp (arg, "-h"))
-	; // FIXME: show help
+	{
+	  Usage (stdout);
+	  return 0;
+	}
       else
 	{
 	  Inform ("unknown flag `%s'", arg);
-	  // FIXME: show help
+	  Usage ();
 	  return 1;
 	}
     }
@@ -223,7 +247,7 @@ int main (int argc, char *argv[])
   if (argno != argc)
     {
       Inform ("unknown argument `%s'", argv[argno]);
-      // FIXME: show help
+      Usage ();
       return 1;
     }
 

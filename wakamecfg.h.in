@@ -1,0 +1,4 @@
+// Identification of the build
+#define PROJECT_NAME "@CMAKE_PROJECT_NAME@"
+#define PROJECT_VERSION "@CMAKE_PROJECT_VERSION@"
+#define PROJECT_URL "@PROJECT_URL@"
