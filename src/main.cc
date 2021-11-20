@@ -41,7 +41,7 @@ struct KeyName
 };
 
 // There are only a few keys that can be used
-KeyName const keys[]
+constexpr KeyName const keys[]
 = {
   {KEY_LEFTMETA, "Windows"},
   {KEY_LEFTALT, "LeftAlt"},
@@ -65,19 +65,38 @@ char const *progName = "wakame";
 bool flagVerbose = false;
 char defaultButtons[] = "Windows Windows+LeftAlt Windows+RightAlt";
 
+enum KeyFlags : unsigned char 
+{
+  KF_Used = 1 << 0, // we are interested in this key
+  KF_Down = 1 << 1, // this key is pressed
+  KF_Changed  = 1 << 1, // this key changed state
+};
+
+unsigned char keyState[KEY_CNT];
+
 struct Map
 {
-  unsigned mouse = 0;
-  unsigned key = 0;
-  unsigned modifier = 0;
-  bool keyDown = false;
-  bool modDown = false;
+  unsigned mouse = 0; // the mouse BTN to emit
+  unsigned key = 0;  // the keyboard KEY we want
+  unsigned modifier = 0;  // keyboard modifier, if any
+  bool buttonDown = false; // whether we consider this pressed
 
   constexpr Map () = default;
 };
 
 auto const numButtons = 3;
 Map mapping[numButtons];
+
+}
+
+namespace 
+{
+template<typename T>
+constexpr bool TestBit (T const *bits, unsigned n)
+{
+  return (bits[n / (sizeof (T) * charBits)]
+	  >> (n & (sizeof (T) * charBits - 1))) & 1;
+}
 
 }
 
@@ -94,13 +113,6 @@ void Inform (char const *fmt, ...) {
 
 #define Verbose(fmt, ...)						\
   (flagVerbose ? Inform (fmt __VA_OPT__(, __VA_ARGS__)) : void(0))
-
-template<typename T>
-constexpr bool TestBit (T const *bits, unsigned n)
-{
-  return (bits[n / (sizeof (T) * charBits)]
-	  >> (n & (sizeof (T) * charBits - 1))) & 1;
-}
 
 char const *KeyName (unsigned code)
 {
@@ -142,12 +154,14 @@ bool ParseMapping (char *buttons)
       if (code)
 	{
 	  mapping[btn].key = code;
+	  keyState[code] = KF_Used;
 	  if (plus)
 	    {
 	      *plus++ = '+';
 	      pos = plus;
 	      code = KeyCode (pos);
 	      mapping[btn].modifier = code;
+	      keyState[code] = KF_Used;
 	    }
 	  if (!code)
 	    {
@@ -182,10 +196,10 @@ bool ParseMapping (char *buttons)
 
 // See if FD is the keyboard we want.  Must match wanted and accept
 // key events.
-bool IsKeyboard (int fd, char const *fName, char const *wantedName = nullptr)
+int IsKeyboard (int fd, char const *fName, char const *wantedName = nullptr)
 {
   int version;
-  char devName[256];
+  char devName[MAXNAMLEN];
   int sDevLen;
   unsigned long typebits;
 
@@ -282,7 +296,7 @@ int FindKeyboard (char const *wanted = nullptr)
 	  while (struct dirent const *ent = readdir (dir))
 	    if (ent->d_type == DT_CHR)
 	      {
-		fd = openat (dirfd, ent->d_name, O_RDONLY | O_NONBLOCK, 0);
+		fd = openat (dirfd, ent->d_name, O_RDONLY/* | O_NONBLOCK*/, 0);
 		if (fd >= 0)
 		  {
 		    if (IsKeyboard (fd, ent->d_name, wanted))
@@ -303,6 +317,15 @@ int FindKeyboard (char const *wanted = nullptr)
 // Verify keyboard has the keys we need.
 bool InitKeyboard (int fd)
 {
+  // Try grabbing it to check no one else is
+  int rc = ioctl (fd, EVIOCGRAB, reinterpret_cast<void *> (1));
+  ioctl (fd, EVIOCGRAB, reinterpret_cast<void *> (0));
+  if (rc < 0)
+    {
+      Inform ("keyboard is grabbed by another process");
+      return false;
+    }
+  
   ul_t bits[(KEY_CNT + ulBits - 1) / ulBits];
   ioctl(fd, EVIOCGBIT(EV_KEY, KEY_CNT), bits);
   for (unsigned ix = numButtons; ix--;)
@@ -336,22 +359,18 @@ int InitUser (char const *name)
   else
     {
       for (unsigned ix = numButtons; ix--;)
-	{
-	  if (ioctl(fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
-	    goto fail;
-	  if (ioctl(fd, UI_SET_KEYBIT, mapping[ix].key) < 0)
-	    goto fail;
-	  if (mapping[ix].modifier
-	      && ioctl(fd, UI_SET_KEYBIT, mapping[ix].modifier) < 0)
-	    goto fail;
-	}
+	if (mapping[ix].mouse && ioctl(fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
+	  goto fail;
+      for (unsigned ix = KEY_CNT; ix--;)
+	if (keyState[ix] && ioctl(fd, UI_SET_KEYBIT, ix) < 0)
+	  goto fail;
 
       uinput_user_dev udev;
       memset (&udev, 0, sizeof (udev));
       snprintf (udev.name, UINPUT_MAX_NAME_SIZE,
 		"Keyboard Virtual Mouse Buttons");
       udev.id.bustype = BUS_VIRTUAL;
-      udev.id.vendor  = 21323; // Julian Day 2021-11-19
+      udev.id.vendor  = 21324; // Julian Day 2021-11-20
       udev.id.product = 0x1;
       unsigned vmaj, vmin;
       sscanf (PROJECT_VERSION, "%u.%u", &vmaj, &vmin);
@@ -365,6 +384,63 @@ int InitUser (char const *name)
     }
 
   return fd;
+}
+
+bool Loop (int keyfd, int userfd)
+{
+  unsigned changed[numButtons * 2];
+  unsigned numChanged = 0;
+
+  constexpr unsigned maxEv = 64;
+  input_event events[maxEv];
+
+  for (;;)
+    {
+      int cnt = read (keyfd, events, sizeof (events));
+      if (cnt < 0)
+	{
+	  Inform ("error reading keyboard: %m");
+	  return false;
+	}
+      for (auto const *ev = events; cnt; ev++)
+	{
+	  cnt -= sizeof (*ev);
+	  if (cnt < 0)
+	    {
+	      Inform ("unexpected byte count reading keyboard");
+	      return false;
+	    }
+
+	  if (ev->type == EV_KEY)
+	    {
+	      unsigned code = ev->code;
+	      if (ev->code < KEY_CNT && keyState[code] & KF_Used)
+		{
+		  if (!(keyState[code] & KF_Changed))
+		    changed[numChanged++] = code;
+		  keyState[code] = ((ev->value ? KF_Down : 0)
+				    | KF_Used | KF_Changed);
+		}
+	    }
+	  else if (ev->type == EV_SYN)
+	    {
+	      if (ev->code == SYN_DROPPED)
+		Inform ("dropped packets");
+	      if (numChanged)
+		{
+		  Verbose ("%d keys of interest changed", numChanged);
+		  // FIXME: Figure if we need to send anything
+
+		  // Reset the changed flags on the changed keys
+		  while (numChanged--)
+		    keyState[changed[numChanged]] &= ~KF_Changed;
+		  numChanged = 0;
+		}
+	    }
+	}      
+    }
+
+  return true;
 }
 
 void Usage (FILE *stream = stderr)
@@ -461,10 +537,17 @@ int main (int argc, char *argv[])
       return 1;
     }
 
-  int userFd = InitKeyboard (keyFd) ? InitUser (user) : -1;
+  int userFd = -1;
+
+  if (InitKeyboard (keyFd))
+    userFd = InitUser (user);
 
   if (userFd >= 0)
-    close (userFd);
+    {
+      Loop (keyFd, userFd);
+
+      close (userFd);
+    }
   close (keyFd);
 
   return 0;
