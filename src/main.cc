@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <linux/uinput.h>
 #include <sys/types.h>
 
 namespace 
@@ -33,16 +34,51 @@ auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
 
-// FIXME: think about how to make this more flexible
-unsigned const mouseKey = KEY_LEFTMETA;
-unsigned const mouseMiddleAlt = KEY_LEFTALT;
-unsigned const mouseRightAlt = KEY_RIGHTALT;
+struct KeyName 
+{
+  unsigned key;
+  char const *name;
+};
+
+// There are only a few keys that can be used
+KeyName const keys[]
+= {
+  {KEY_LEFTMETA, "Windows"},
+  {KEY_LEFTALT, "LeftAlt"},
+  {KEY_RIGHTALT, "RightAlt"},
+  {KEY_LEFTCTRL, "LeftCtrl"},
+  {KEY_RIGHTCTRL, "RightCtrl"},
+
+  {KEY_LEFTMETA, "LeftMeta"},
+  {KEY_LEFTALT, "Alt_L"},
+  {KEY_LEFTCTRL, "Ctrl_L"},
+  {KEY_LEFTMETA, "Super_L"},
+  {KEY_RIGHTALT, "Alt_R"},
+  {KEY_RIGHTCTRL, "Ctrl_R"},
+
+  {0, nullptr}};
 }
 
 namespace
 {
 char const *progName = "wakame";
 bool flagVerbose = false;
+char defaultButtons[] = "Windows Windows+LeftAlt Windows+RightAlt";
+
+struct Map
+{
+  unsigned mouse = 0;
+  unsigned key = 0;
+  unsigned modifier = 0;
+  bool keyDown = false;
+  bool modDown = false;
+
+  constexpr Map () = default;
+};
+
+auto const numButtons = 3;
+Map mapping[numButtons];
+
 }
 
 namespace 
@@ -62,8 +98,86 @@ void Inform (char const *fmt, ...) {
 template<typename T>
 constexpr bool TestBit (T const *bits, unsigned n)
 {
-  return (bits[n / sizeof (T) * charBits] >> (n & (sizeof (T) * charBits - 1)))
-    & 1;
+  return (bits[n / (sizeof (T) * charBits)]
+	  >> (n & (sizeof (T) * charBits - 1))) & 1;
+}
+
+char const *KeyName (unsigned code)
+{
+  for (auto *key = keys; key->key; key++)
+    if (key->key == code)
+      return key->name;
+  return nullptr;
+}
+
+unsigned KeyCode (char const *name)
+{
+  for (auto *key = keys; key->key; key++)
+    if (!strcasecmp (name, key->name))
+      return key->key;
+  return 0;
+}
+
+bool ParseMapping (char *buttons)
+{
+  unsigned btn = 0;
+  for (auto *pos = buttons;; btn++)
+    {
+      while (*pos == ' ')
+	pos++;
+      if (!*pos)
+	break;
+      if (btn == numButtons)
+	goto toomany;
+
+      char *end = strchr (pos, ' ');
+      if (!end)
+	end = pos + strlen (pos);
+      char endch = *end;
+      *end = 0;
+      char *plus = strchr (pos, '+');
+      if (plus)
+	*plus = 0;
+      unsigned code = KeyCode (pos);
+      if (code)
+	{
+	  mapping[btn].key = code;
+	  if (plus)
+	    {
+	      *plus++ = '+';
+	      pos = plus;
+	      code = KeyCode (pos);
+	      mapping[btn].modifier = code;
+	    }
+	  if (!code)
+	    {
+	      Inform ("unknown key `%s'", pos);
+	      return false;
+	    }
+	}
+      *end = endch;
+      pos = end;
+    }
+
+  if (!btn)
+    {
+    toomany:
+      Inform ("must specify 1 to 3 buttons");
+      return false;
+    }
+
+  // There must be at least one button;
+  mapping[0].mouse = BTN_LEFT;
+  if (btn == 3)
+    {
+      // 3 buttons left/middle/right
+      mapping[1].mouse = BTN_MIDDLE;
+      mapping[2].mouse = BTN_RIGHT;
+    }
+  else if (btn == 2)
+    // 2 buttons left & right
+    mapping[1].mouse = BTN_RIGHT;
+  return true;
 }
 
 // See if FD is the keyboard we want.  Must match wanted and accept
@@ -186,6 +300,73 @@ int FindKeyboard (char const *wanted = nullptr)
   return fd;
 }
 
+// Verify keyboard has the keys we need.
+bool InitKeyboard (int fd)
+{
+  ul_t bits[(KEY_CNT + ulBits - 1) / ulBits];
+  ioctl(fd, EVIOCGBIT(EV_KEY, KEY_CNT), bits);
+  for (unsigned ix = numButtons; ix--;)
+    {
+      for (unsigned jx = 0; jx != 2; jx++)
+	if (auto key = (&mapping[ix].key)[jx])
+	  if (!TestBit (bits, key))
+	    {
+	      Inform ("keyboard does not generate key %d (%s)",
+		      key, KeyName (key));
+	      return false;
+	    }
+    }
+
+  // FIXME: can/should we disable the modifierness/repeatness of the key?
+  return true;
+}
+
+int InitUser (char const *name)
+{
+  int fd = open (name, O_WRONLY | O_NONBLOCK);
+  if (fd < 0)
+    Inform ("cannot open output `%s': %m", name);
+  else if (ioctl (fd, UI_SET_EVBIT, EV_KEY) < 0)
+    {
+    fail:
+      Inform ("cannot initialize `%s': %m", name);
+      close (fd);
+      fd = -1;
+    }
+  else
+    {
+      for (unsigned ix = numButtons; ix--;)
+	{
+	  if (ioctl(fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
+	    goto fail;
+	  if (ioctl(fd, UI_SET_KEYBIT, mapping[ix].key) < 0)
+	    goto fail;
+	  if (mapping[ix].modifier
+	      && ioctl(fd, UI_SET_KEYBIT, mapping[ix].modifier) < 0)
+	    goto fail;
+	}
+
+      uinput_user_dev udev;
+      memset (&udev, 0, sizeof (udev));
+      snprintf (udev.name, UINPUT_MAX_NAME_SIZE,
+		"Keyboard Virtual Mouse Buttons");
+      udev.id.bustype = BUS_VIRTUAL;
+      udev.id.vendor  = 21323; // Julian Day 2021-11-19
+      udev.id.product = 0x1;
+      unsigned vmaj, vmin;
+      sscanf (PROJECT_VERSION, "%u.%u", &vmaj, &vmin);
+      udev.id.version = vmaj * 1000 + vmin;
+
+      if (write (fd, &udev, sizeof (udev)) < 0)
+	goto fail;
+
+      if (ioctl (fd, UI_DEV_CREATE) < 0)
+	goto fail;
+    }
+
+  return fd;
+}
+
 void Usage (FILE *stream = stderr)
 {
   fprintf (stream, R"(Keyboard Emulation of Mouse Buttons
@@ -205,12 +386,13 @@ beginning and/or end of the reported name.
 OUTPUTDEVICE defaults to %s.
 
 Options:
-  -h	Help
-  -v	Be verbose
+  -h	  Help
+  -m MAP  Mapping (%s)
+  -v	  Be verbose
 
 Usually requires root privilege, as we muck about in /dev.
 
-)", progName, inputDevDir, inputDevDir, uinputDev);
+)", progName, inputDevDir, inputDevDir, uinputDev, defaultButtons);
   fprintf (stream, "Version %s.\n", PROJECT_NAME " " PROJECT_VERSION);
   if (PROJECT_URL[0])
     fprintf (stream, "See %s for more information.\n", PROJECT_URL);
@@ -227,6 +409,7 @@ int main (int argc, char *argv[])
       progName = pName;
     }
 
+  char *buttons = defaultButtons;
   int argno = 1;
   for (; argno < argc; argno++)
     {
@@ -240,6 +423,8 @@ int main (int argc, char *argv[])
 	  Usage (stdout);
 	  return 0;
 	}
+      else if (!strcmp (arg, "-m") && argno + 1 != argc)
+	buttons = argv[++argno];
       else
 	{
 	  Inform ("unknown flag `%s'", arg);
@@ -248,9 +433,15 @@ int main (int argc, char *argv[])
 	}
     }
 
+  if (!ParseMapping (buttons))
+    return 1;
+
   char const *keyboard = keyboardName;
   if (argno < argc)
     keyboard = argv[argno++];
+  char const *user = uinputDev;
+  if (argno < argc)
+    user = argv[argno++];
 
   if (argno != argc)
     {
@@ -269,7 +460,11 @@ int main (int argc, char *argv[])
 	      geteuid () ? " (not root, sudo?)" : "");
       return 1;
     }
-  
+
+  int userFd = InitKeyboard (keyFd) ? InitUser (user) : -1;
+
+  if (userFd >= 0)
+    close (userFd);
   close (keyFd);
 
   return 0;
