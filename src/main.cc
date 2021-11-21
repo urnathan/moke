@@ -33,7 +33,7 @@ auto const ulBits = sizeof (ul_t) * charBits;
 auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
-auto const &deviceName = "Keyboard Virtual Mouse Buttons";
+auto const &deviceName = "Wakame Key->Btn Mapper";
 
 struct KeyName 
 {
@@ -70,7 +70,7 @@ constexpr KeyName const buttons[]
 
 namespace
 {
-char const *progName = "wakame";
+char const *progName = "";
 bool flagVerbose = false;
 
 signed char keyState[KEY_CNT];
@@ -204,7 +204,8 @@ bool InitMapping ()
 
 // See if FD is the keyboard we want.  Must match wanted and accept
 // key events.
-int IsKeyboard (int fd, char const *fName, char const *wantedName = nullptr)
+int IsKeyboard (int fd, char const *dir, char const *fName,
+		bool search, char const *wantedName = nullptr)
 {
   int version;
   char devName[MAXNAMLEN];
@@ -227,6 +228,15 @@ int IsKeyboard (int fd, char const *fName, char const *wantedName = nullptr)
       return false;
     }
   devLen--; // Make it the usual len we care about
+
+  if (!strcmp (devName, deviceName))
+    {
+      Inform ("already present at `%s%s%s'", dir ? dir : "", &"/"[!dir], fName);
+      return -1;
+    }
+
+  if (!search)
+    return false;
 
   if (!(typebits & (1 << EV_KEY)))
     {
@@ -275,48 +285,68 @@ int IsKeyboard (int fd, char const *fName, char const *wantedName = nullptr)
 int FindKeyboard (char const *wanted = nullptr)
 {
   int fd = -1;
+  bool ok = true;
+  // If wanted looks like a pathname, assume it is.
+  bool wantPathname = wanted
+    && (wanted[wanted[0] == '.'] == '/' || !strchr (wanted, ' '));
+
   int dirfd = open (inputDevDir, O_RDONLY | O_DIRECTORY);
+  DIR *dir = dirfd >= 0 ? fdopendir (dirfd) : nullptr;
 
-  if (dirfd < 0)
-    Inform ("cannot open %s: %m", inputDevDir);
-  else
+  if (dir)
     {
-      // Try a direct open of something that might be file-like --
-      // begins with '/' or './' or doesn't contain ' '
-      if (wanted &&
-	  (wanted[wanted[0] == '.'] == '/' || !strchr (wanted, ' ')))
-	{
-	  fd = openat (dirfd, wanted, O_RDONLY | O_NONBLOCK, 0);
-	  if (fd >= 0)
-	    {
-	      if (IsKeyboard (fd, wanted, nullptr))
-		{
-		  close (dirfd);
-		  return fd;
-		}
-	      close (fd);
-	      fd = -1;
-	    }
-	}
-
-      if (DIR *dir = fdopendir (dirfd))
-	{
-	  while (struct dirent const *ent = readdir (dir))
-	    if (ent->d_type == DT_CHR)
+      // Scan the directory looking for a keyboard and checking we're
+      // not already installed.
+      while (struct dirent const *ent = readdir (dir))
+	if (ent->d_type == DT_CHR)
+	  {
+	    // We do want to block reading this!
+	    int probe = openat (dirfd, ent->d_name, O_RDONLY, 0);
+	    if (probe >= 0)
 	      {
-		fd = openat (dirfd, ent->d_name, O_RDONLY/* | O_NONBLOCK*/, 0);
-		if (fd >= 0)
+		if (auto found = IsKeyboard (probe, inputDevDir, ent->d_name,
+					     !wantPathname, wanted))
 		  {
-		    if (IsKeyboard (fd, ent->d_name, wanted))
-		      break;
-		    close (fd);
-		    fd = -1;
+		    if (found < 0)
+		      ok = false;
+		    else if (fd >= 0)
+		      {
+			Inform ("multiple devices found"
+				" (use a more specific name?)");
+			ok = false;
+		      }
+		    else
+		      fd = probe;
 		  }
+
+		if (probe != fd)
+		  close (probe);
 	      }
-	  closedir (dir);
+	  }
+    }
+  else
+    Inform ("cannot open %s: %m", inputDevDir);
+
+  if (ok && wantPathname)
+    {
+      fd = openat (dirfd, wanted, O_RDONLY, 0);
+      if (fd < 0)
+	Inform ("cannot open `%s': %m", wanted);
+      else if (!IsKeyboard (fd, nullptr, wanted, true, nullptr))
+	{
+	  close (fd);
+	  fd = -1;
 	}
-      else
-	close (dirfd);
+    }
+  if (dir)
+    closedir (dir);
+  else
+    close (dirfd);
+
+  if (!ok)
+    {
+      close (fd);
+      fd = -2;
     }
 
   return fd;
@@ -350,7 +380,7 @@ bool InitKeyboard (int fd)
   return true;
 }
 
-int InitUser (char const *name)
+int InitDevice (char const *name)
 {
   int fd = open (name, O_WRONLY | O_NONBLOCK);
   if (fd < 0)
@@ -610,9 +640,9 @@ int main (int argc, char *argv[])
   char const *keyboard = keyboardName;
   if (argno < argc)
     keyboard = argv[argno++];
-  char const *user = uinputDev;
+  char const *device = uinputDev;
   if (argno < argc)
-    user = argv[argno++];
+    device = argv[argno++];
 
   if (argno != argc)
     {
@@ -624,24 +654,27 @@ int main (int argc, char *argv[])
   int keyFd = FindKeyboard (keyboard);
   if (keyFd < 0)
     {
-      bool usingDefault = keyboard == keyboardName;
-      Inform (usingDefault ? "cannot find keyboard%s%s"
-	      : "cannot find keyboard `%s'%s",
-	      usingDefault ? "" : keyboard,
-	      geteuid () ? " (not root, sudo?)" : "");
+      if (keyFd == -1)
+	{
+	  bool usingDefault = keyboard == keyboardName;
+	  Inform (usingDefault ? "cannot find keyboard%s%s"
+		  : "cannot find keyboard `%s'%s",
+		  usingDefault ? "" : keyboard,
+		  geteuid () ? " (not root, sudo?)" : "");
+	}
       return 1;
     }
 
-  int userFd = -1;
+  int devFd = -1;
 
   if (InitKeyboard (keyFd))
-    userFd = InitUser (user);
+    devFd = InitDevice (device);
 
-  if (userFd >= 0)
+  if (devFd >= 0)
     {
-      Loop (keyFd, userFd);
+      Loop (keyFd, devFd);
 
-      close (userFd);
+      close (devFd);
     }
   close (keyFd);
 
