@@ -1,9 +1,10 @@
-// Wakame - Windows+Alt Keys As Mouse Emulation
+// Wakame - Windows+Alt Keys As Mouse Emulation -*- mode:c++ -*-
 // Copyright (C) 2021 Nathan Sidwell, nathan@acm.org
 // License: Affero GPL v3.0
 
 // Although this is C++, we're only using it for syntax and staying in
-// the C subset of runtime.
+// the C subset of runtime.  From the build's PoV this is C and we do
+// not link with the C++ runtime.
 
 #include "wakamecfg.h"
 // C
