@@ -13,7 +13,6 @@ endif ()
 project (Wakame VERSION 1.0 LANGUAGES C)
 set (PROJECT_URL "https://github.com/urnathan/wakame")
 
-
 include (CheckLibraryExists)
 include (CheckSymbolExists)
 
@@ -21,6 +20,9 @@ if (NOT CMAKE_BUILD_TYPE)
   set (CMAKE_BUILD_TYPE Debug)
 endif ()
 message (NOTICE "Build type:${CMAKE_BUILD_TYPE}")
+
+option (WAKAME_SETUID "Install setuid" OFF)
+message (NOTICE "Setuid install:${WAKAME_SETUID}")
 
 # -g3 means we get macros
 set (CMAKE_CXX_FLAGS_DEBUG -g3)
@@ -38,6 +40,14 @@ configure_file (wakamecfg.h.in wakamecfg.h ESCAPE_QUOTES)
 include_directories ("${CMAKE_CURRENT_BINARY_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+set (PERMISSIONS
+  OWNER_WRITE OWNER_READ OWNER_EXECUTE
+  GROUP_READ GROUP_EXECUTE
+  WORLD_READ WORLD_EXECUTE)
+if (${WAKAME_SETUID})
+  list (APPEND PERMISSIONS SETUID)
+endif ()
+
 add_executable (wakame wakame.c)
-set_target_properties(wakame PROPERTIES LINKER_LANGUAGE C)
-install (TARGETS wakame DESTINATION bin)
+
+install (TARGETS wakame DESTINATION bin PERMISSIONS ${PERMISSIONS})
