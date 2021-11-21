@@ -59,6 +59,14 @@ constexpr KeyName const keys[]
   {0, nullptr}};
 }
 
+constexpr KeyName const buttons[]
+= {
+  {BTN_LEFT, "LeftMouse"},
+  {BTN_MIDDLE, "MiddleMouse"},
+  {BTN_RIGHT, "RightMouse"},
+  {0, nullptr},
+};
+
 namespace
 {
 char const *progName = "wakame";
@@ -85,8 +93,9 @@ struct Map
   constexpr Map () = default;
 };
 
-auto const numButtons = 3;
-Map mapping[numButtons];
+auto const buttonHWM = 3;
+unsigned numButtons = 0;
+Map mapping[buttonHWM];
 
 }
 
@@ -115,9 +124,9 @@ void Inform (char const *fmt, ...) {
 #define Verbose(fmt, ...)						\
   (flagVerbose ? Inform (fmt __VA_OPT__(, __VA_ARGS__)) : void(0))
 
-char const *KeyName (unsigned code)
+char const *KeyName (unsigned code, KeyName const *key = keys)
 {
-  for (auto *key = keys; key->key; key++)
+  for (; key->key; key++)
     if (key->key == code)
       return key->name;
   return nullptr;
@@ -133,14 +142,13 @@ unsigned KeyCode (char const *name)
 
 bool ParseMapping (char *buttons)
 {
-  unsigned btn = 0;
-  for (auto *pos = buttons;; btn++)
+  for (auto *pos = buttons;; numButtons++)
     {
       while (*pos == ' ')
 	pos++;
       if (!*pos)
 	break;
-      if (btn == numButtons)
+      if (numButtons == buttonHWM)
 	goto toomany;
 
       char *end = strchr (pos, ' ');
@@ -154,14 +162,14 @@ bool ParseMapping (char *buttons)
       unsigned code = KeyCode (pos);
       if (code)
 	{
-	  mapping[btn].key = code;
+	  mapping[numButtons].key = code;
 	  keyState[code] = KF_Used;
 	  if (plus)
 	    {
 	      *plus++ = '+';
 	      pos = plus;
 	      code = KeyCode (pos);
-	      mapping[btn].mod = code;
+	      mapping[numButtons].mod = code;
 	      keyState[code] = KF_Used;
 	    }
 	  if (!code)
@@ -174,7 +182,7 @@ bool ParseMapping (char *buttons)
       pos = end;
     }
 
-  if (!btn)
+  if (!numButtons)
     {
     toomany:
       Inform ("must specify 1 to 3 buttons");
@@ -183,13 +191,13 @@ bool ParseMapping (char *buttons)
 
   // There must be at least one button;
   mapping[0].mouse = BTN_LEFT;
-  if (btn == 3)
+  if (numButtons == 3)
     {
       // 3 buttons left/middle/right
       mapping[1].mouse = BTN_MIDDLE;
       mapping[2].mouse = BTN_RIGHT;
     }
-  else if (btn == 2)
+  else if (numButtons == 2)
     // 2 buttons left & right
     mapping[1].mouse = BTN_RIGHT;
 
@@ -338,16 +346,14 @@ bool InitKeyboard (int fd)
   ul_t bits[(KEY_CNT + ulBits - 1) / ulBits];
   ioctl(fd, EVIOCGBIT(EV_KEY, KEY_CNT), bits);
   for (unsigned ix = numButtons; ix--;)
-    {
-      for (unsigned jx = 0; jx != 2; jx++)
-	if (auto key = (&mapping[ix].key)[jx])
-	  if (!TestBit (bits, key))
-	    {
-	      Inform ("keyboard does not generate key %d (%s)",
-		      key, KeyName (key));
-	      return false;
-	    }
-    }
+    for (unsigned jx = 0; jx != 2; jx++)
+      if (auto key = (&mapping[ix].key)[jx])
+	if (!TestBit (bits, key))
+	  {
+	    Inform ("keyboard does not generate key %d (%s)",
+		    key, KeyName (key));
+	    return false;
+	  }
 
   // FIXME: can/should we disable the modifierness/repeatness of the key?
   return true;
@@ -368,7 +374,7 @@ int InitUser (char const *name)
   else
     {
       for (unsigned ix = numButtons; ix--;)
-	if (mapping[ix].mouse && ioctl(fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
+	if (ioctl(fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
 	  goto fail;
       for (unsigned ix = KEY_CNT; ix--;)
 	if (keyState[ix] && ioctl(fd, UI_SET_KEYBIT, ix) < 0)
@@ -397,7 +403,7 @@ int InitUser (char const *name)
 
 bool Loop (int keyfd, int userfd)
 {
-  unsigned changed[numButtons * 2];
+  unsigned changed[buttonHWM * 2];
   unsigned numChanged = 0;
 
   constexpr unsigned maxInEv = 8;
@@ -437,22 +443,21 @@ bool Loop (int keyfd, int userfd)
 		Inform ("dropped packets");
 	      else if (ev->code == SYN_REPORT && numChanged)
 		{
-		  constexpr unsigned maxOutEv = numButtons * 3 + 1;
+		  constexpr unsigned maxOutEv = buttonHWM * 3 + 1;
 		  input_event eventsOut[maxOutEv];
 
 		  auto *out = eventsOut;
 		  unsigned downMask = 0;
 		  unsigned overrideMask = 0;
 		  for (unsigned ix = 0; ix != numButtons; ix++)
-		    if (mapping[ix].key)
-		      {
-			bool down = (keyState[mapping[ix].key] & KF_Down)
-			  && (!mapping[ix].mod
-			      || (keyState[mapping[ix].mod] & KF_Down));
-			downMask |= unsigned (down) << ix;
-			if (mapping[ix].override && (down || mapping[ix].down))
-			  overrideMask |= 1 << mapping[ix].override;
-		      }
+		    {
+		      bool down = (keyState[mapping[ix].key] & KF_Down)
+			&& (!mapping[ix].mod
+			    || (keyState[mapping[ix].mod] & KF_Down));
+		      downMask |= unsigned (down) << ix;
+		      if (mapping[ix].override && (down || mapping[ix].down))
+			overrideMask |= 1 << mapping[ix].override;
+		    }
 		  downMask &= ~(overrideMask >> 1);
 
 		  for (unsigned ix = 0; ix != numButtons; ix++)
@@ -461,7 +466,8 @@ bool Loop (int keyfd, int userfd)
 		      if (down != mapping[ix].down)
 			{
 			  // This button has changed state.
-			  Verbose ("mouse %d is %s", mapping[ix].mouse,
+			  Verbose ("mouse %d (%s) is %s", mapping[ix].mouse,
+				   KeyName (mapping[ix].mouse, buttons),
 				   down ? "pressed" : "released");
 			  mapping[ix].down = down;
 			  *out = *ev;
