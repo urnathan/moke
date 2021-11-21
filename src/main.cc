@@ -71,7 +71,6 @@ namespace
 {
 char const *progName = "wakame";
 bool flagVerbose = false;
-char defaultButtons[] = "Windows Windows+LeftAlt Windows+RightAlt";
 
 enum KeyFlags : unsigned char 
 {
@@ -84,18 +83,22 @@ unsigned char keyState[KEY_CNT];
 
 struct Map
 {
-  unsigned mouse = 0; // the mouse BTN to emit
-  unsigned key = 0;  // the keyboard KEY we want
-  unsigned mod = 0;  // keyboard modifier, if any
-  char override = 0; // overrides a non-modifier key
-  bool down = false; // whether we consider this pressed
+  unsigned mouse; // the mouse BTN to emit
+  unsigned key;  // the keyboard KEY we want
+  unsigned mod;  // keyboard modifier, if any
+  char override; // overrides a non-modified button
 
-  constexpr Map () = default;
+  bool down; // whether we consider this pressed
 };
 
 auto const buttonHWM = 3;
 unsigned numButtons = 0;
-Map mapping[buttonHWM];
+Map mapping[buttonHWM]
+= {
+  {BTN_LEFT, KEY_LEFTMETA, 0, 0, false},
+  {BTN_MIDDLE, KEY_LEFTMETA, KEY_LEFTALT, 0, false},
+  {BTN_RIGHT, KEY_LEFTMETA, KEY_RIGHTALT, 0, false},
+};
 
 }
 
@@ -132,6 +135,11 @@ char const *KeyName (unsigned code, KeyName const *key = keys)
   return nullptr;
 }
 
+char const *ButtonName (unsigned code)
+{
+  return KeyName (code, buttons);
+}
+
 unsigned KeyCode (char const *name)
 {
   for (auto *key = keys; key->key; key++)
@@ -140,73 +148,68 @@ unsigned KeyCode (char const *name)
   return 0;
 }
 
-bool ParseMapping (char *buttons)
+bool ParseMapping (unsigned button, char *opt)
 {
-  for (auto *pos = buttons;; numButtons++)
+  if (numButtons == buttonHWM)
     {
-      while (*pos == ' ')
-	pos++;
-      if (!*pos)
-	break;
-      if (numButtons == buttonHWM)
-	goto toomany;
+      Inform ("too many buttons (limit is %d)", buttonHWM);
+      return false;
+    }
+  for (unsigned ix = numButtons; ix--;)
+    if (button == mapping[ix].mouse)
+      {
+	Inform ("button %d (%s) is already specified",
+		button, ButtonName (button));
+	return false;
+      }
 
-      char *end = strchr (pos, ' ');
-      if (!end)
-	end = pos + strlen (pos);
-      char endch = *end;
-      *end = 0;
-      char *plus = strchr (pos, '+');
+  char *plus = strchr (opt, '+');
+  if (plus)
+    *plus = 0;
+  unsigned code = KeyCode (opt);
+  if (code)
+    {
+      mapping[numButtons].mouse = button;
+      mapping[numButtons].key = code;
       if (plus)
-	*plus = 0;
-      unsigned code = KeyCode (pos);
-      if (code)
 	{
-	  mapping[numButtons].key = code;
-	  keyState[code] = KF_Used;
-	  if (plus)
-	    {
-	      *plus++ = '+';
-	      pos = plus;
-	      code = KeyCode (pos);
-	      mapping[numButtons].mod = code;
-	      keyState[code] = KF_Used;
-	    }
-	  if (!code)
-	    {
-	      Inform ("unknown key `%s'", pos);
-	      return false;
-	    }
+	  *plus++ = '+';
+	  opt = plus;
+	  code = KeyCode (opt);
+	  mapping[numButtons].mod = code;
 	}
-      *end = endch;
-      pos = end;
     }
 
-  if (!numButtons)
+  if (code)
+    numButtons++;
+  else
     {
-    toomany:
-      Inform ("must specify 1 to 3 buttons");
+      Inform ("unknown key `%s'", opt);
       return false;
     }
 
-  // There must be at least one button;
-  mapping[0].mouse = BTN_LEFT;
-  if (numButtons == 3)
-    {
-      // 3 buttons left/middle/right
-      mapping[1].mouse = BTN_MIDDLE;
-      mapping[2].mouse = BTN_RIGHT;
-    }
-  else if (numButtons == 2)
-    // 2 buttons left & right
-    mapping[1].mouse = BTN_RIGHT;
+  return true;
+}
+
+bool InitMapping ()
+{
+  if (!numButtons)
+    // Use the default buttons
+    while (numButtons != buttonHWM && mapping[numButtons].mouse)
+      numButtons++;
 
   // Figure out if modifier combos override any non-modifier button
   for (unsigned ix = numButtons; ix--;)
-    if (!mapping[ix].mod)
-      for (unsigned jx = numButtons; jx--;)
-	if (mapping[jx].mod && mapping[jx].key == mapping[ix].key)
-	  mapping[jx].override = ix + 1;
+    {
+      keyState[mapping[ix].key] = KF_Used;
+      if (mapping[ix].mod)
+	{
+	  keyState[mapping[ix].mod] = KF_Used;
+	  for (unsigned jx = numButtons; jx--;)
+	    if (!mapping[jx].mod && mapping[jx].key == mapping[ix].key)
+	      mapping[ix].override = jx + 1;
+	}
+    }
 
   return true;
 }
@@ -467,7 +470,7 @@ bool Loop (int keyfd, int userfd)
 			{
 			  // This button has changed state.
 			  Verbose ("mouse %d (%s) is %s", mapping[ix].mouse,
-				   KeyName (mapping[ix].mouse, buttons),
+				   ButtonName (mapping[ix].mouse),
 				   down ? "pressed" : "released");
 			  mapping[ix].down = down;
 			  *out = *ev;
@@ -537,12 +540,14 @@ OUTPUTDEVICE defaults to %s.
 
 Options:
   -h	  Help
-  -m MAP  Mapping (%s)
+  -l LEFT  Keys for left
+  -m MIDDLE Keys for middle
+  -r RIGHT Keys for right
   -v	  Be verbose
 
 Usually requires root privilege, as we muck about in /dev.
 
-)", progName, inputDevDir, inputDevDir, uinputDev, defaultButtons);
+)", progName, inputDevDir, inputDevDir, uinputDev);
   fprintf (stream, "Version %s.\n", PROJECT_NAME " " PROJECT_VERSION);
   if (PROJECT_URL[0])
     fprintf (stream, "See %s for more information.\n", PROJECT_URL);
@@ -559,11 +564,10 @@ int main (int argc, char *argv[])
       progName = pName;
     }
 
-  char *buttons = defaultButtons;
   int argno = 1;
   for (; argno < argc; argno++)
     {
-      auto const *arg = argv[argno];
+      auto *arg = argv[argno];
       if (arg[0] != '-')
 	break;
       if (!strcmp (arg, "-v"))
@@ -573,17 +577,46 @@ int main (int argc, char *argv[])
 	  Usage (stdout);
 	  return 0;
 	}
-      else if (!strcmp (arg, "-m") && argno + 1 != argc)
-	buttons = argv[++argno];
       else
 	{
+	  struct Opts 
+	  {
+	    unsigned short button;
+	    char opt[2];
+	  };
+	  static Opts const opts[] =
+	    {
+	      {BTN_LEFT, {'-', 'l'}},
+	      {BTN_MIDDLE, {'-', 'm'}},
+	      {BTN_RIGHT, {'-', 'r'}},
+	      {0, {0, 0}},
+	    };
+	  for (unsigned ix = 0; opts[ix].button; ix++)
+	    if (!strncmp (arg, opts[ix].opt, 2))
+	      {
+		char *opt = arg + 2;
+		if (!*opt)
+		  {
+		    if (argno + 1 == argc)
+		      {
+			Inform ("option `%s' requires an argument", arg);
+			return 1;
+		      }
+		    opt = argv[++argno];
+		  }
+		if (!ParseMapping (opts[ix].button, opt))
+		  return 1;
+		goto found;
+	      }
+
 	  Inform ("unknown flag `%s'", arg);
 	  Usage ();
 	  return 1;
+	found:;
 	}
     }
 
-  if (!ParseMapping (buttons))
+  if (!InitMapping ())
     return 1;
 
   char const *keyboard = keyboardName;
