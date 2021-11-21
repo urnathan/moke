@@ -69,7 +69,7 @@ enum KeyFlags : unsigned char
 {
   KF_Used = 1 << 0, // we are interested in this key
   KF_Down = 1 << 1, // this key is pressed
-  KF_Changed  = 1 << 1, // this key changed state
+  KF_Changed  = 1 << 2, // this key changed state
 };
 
 unsigned char keyState[KEY_CNT];
@@ -78,8 +78,9 @@ struct Map
 {
   unsigned mouse = 0; // the mouse BTN to emit
   unsigned key = 0;  // the keyboard KEY we want
-  unsigned modifier = 0;  // keyboard modifier, if any
-  bool buttonDown = false; // whether we consider this pressed
+  unsigned mod = 0;  // keyboard modifier, if any
+  char override = 0; // overrides a non-modifier key
+  bool down = false; // whether we consider this pressed
 
   constexpr Map () = default;
 };
@@ -160,7 +161,7 @@ bool ParseMapping (char *buttons)
 	      *plus++ = '+';
 	      pos = plus;
 	      code = KeyCode (pos);
-	      mapping[btn].modifier = code;
+	      mapping[btn].mod = code;
 	      keyState[code] = KF_Used;
 	    }
 	  if (!code)
@@ -191,6 +192,14 @@ bool ParseMapping (char *buttons)
   else if (btn == 2)
     // 2 buttons left & right
     mapping[1].mouse = BTN_RIGHT;
+
+  // Figure out if modifier combos override any non-modifier button
+  for (unsigned ix = numButtons; ix--;)
+    if (!mapping[ix].mod)
+      for (unsigned jx = numButtons; jx--;)
+	if (mapping[jx].mod && mapping[jx].key == mapping[ix].key)
+	  mapping[jx].override = ix + 1;
+
   return true;
 }
 
@@ -391,18 +400,18 @@ bool Loop (int keyfd, int userfd)
   unsigned changed[numButtons * 2];
   unsigned numChanged = 0;
 
-  constexpr unsigned maxEv = 64;
-  input_event events[maxEv];
+  constexpr unsigned maxInEv = 8;
+  input_event eventsIn[maxInEv];
 
   for (;;)
     {
-      int cnt = read (keyfd, events, sizeof (events));
+      int cnt = read (keyfd, eventsIn, sizeof (eventsIn));
       if (cnt < 0)
 	{
 	  Inform ("error reading keyboard: %m");
 	  return false;
 	}
-      for (auto const *ev = events; cnt; ev++)
+      for (auto const *ev = eventsIn; cnt; ev++)
 	{
 	  cnt -= sizeof (*ev);
 	  if (cnt < 0)
@@ -426,10 +435,69 @@ bool Loop (int keyfd, int userfd)
 	    {
 	      if (ev->code == SYN_DROPPED)
 		Inform ("dropped packets");
-	      if (numChanged)
+	      else if (ev->code == SYN_REPORT && numChanged)
 		{
-		  Verbose ("%d keys of interest changed", numChanged);
-		  // FIXME: Figure if we need to send anything
+		  constexpr unsigned maxOutEv = numButtons * 3 + 1;
+		  input_event eventsOut[maxOutEv];
+
+		  auto *out = eventsOut;
+		  unsigned downMask = 0;
+		  unsigned overrideMask = 0;
+		  for (unsigned ix = 0; ix != numButtons; ix++)
+		    if (mapping[ix].key)
+		      {
+			bool down = (keyState[mapping[ix].key] & KF_Down)
+			  && (!mapping[ix].mod
+			      || (keyState[mapping[ix].mod] & KF_Down));
+			downMask |= unsigned (down) << ix;
+			if (mapping[ix].override && (down || mapping[ix].down))
+			  overrideMask |= 1 << mapping[ix].override;
+		      }
+		  downMask &= ~(overrideMask >> 1);
+
+		  for (unsigned ix = 0; ix != numButtons; ix++)
+		    {
+		      bool down = (downMask >> ix) & 1;
+		      if (down != mapping[ix].down)
+			{
+			  // This button has changed state.
+			  Verbose ("mouse %d is %s", mapping[ix].mouse,
+				   down ? "pressed" : "released");
+			  mapping[ix].down = down;
+			  *out = *ev;
+			  out->type = EV_KEY;
+			  out->code = mapping[ix].mouse;
+			  out->value = down;
+			  out++;
+			  if (down)
+			    {
+			      // Hide the keys from downstream
+			      // consumers.
+			      *out = *ev;
+			      out->type = EV_KEY;
+			      out->code = mapping[ix].key;
+			      out->value = 0;
+			      out++;
+			      if (mapping[ix].mod)
+				{
+				  *out = *ev;
+				  out->type = EV_KEY;
+				  out->code = mapping[ix].mod;
+				  out->value = 0;
+				  out++;
+				}
+			    }
+			}
+		    }
+
+		  if (out != eventsOut)
+		    {
+		      *out++ = *ev;
+		      int bytes = (out - eventsOut) * sizeof (*out);
+		      int cout = write (userfd, eventsOut, bytes);
+		      if (cout != bytes)
+			Inform ("unexpected byte count writing");
+		    }
 
 		  // Reset the changed flags on the changed keys
 		  while (numChanged--)
