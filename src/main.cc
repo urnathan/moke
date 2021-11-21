@@ -33,6 +33,7 @@ auto const ulBits = sizeof (ul_t) * charBits;
 auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
+auto const &deviceName = "Keyboard Virtual Mouse Buttons";
 
 struct KeyName 
 {
@@ -72,14 +73,7 @@ namespace
 char const *progName = "wakame";
 bool flagVerbose = false;
 
-enum KeyFlags : unsigned char 
-{
-  KF_Used = 1 << 0, // we are interested in this key
-  KF_Down = 1 << 1, // this key is pressed
-  KF_Changed  = 1 << 2, // this key changed state
-};
-
-unsigned char keyState[KEY_CNT];
+signed char keyState[KEY_CNT];
 
 struct Map
 {
@@ -91,13 +85,14 @@ struct Map
   bool down; // whether we consider this pressed
 };
 
-auto const buttonHWM = 3;
+auto const buttonHWM = 6;
 unsigned numButtons = 0;
 Map mapping[buttonHWM]
 = {
   {BTN_LEFT, KEY_LEFTMETA, 0, 0, false},
   {BTN_MIDDLE, KEY_LEFTMETA, KEY_LEFTALT, 0, false},
-  {BTN_RIGHT, KEY_LEFTMETA, KEY_RIGHTALT, 0, false},
+  {BTN_RIGHT, KEY_RIGHTCTRL, 0, 0, false},
+  {BTN_MIDDLE, KEY_RIGHTCTRL, KEY_RIGHTALT, 0, false},
 };
 
 }
@@ -155,13 +150,6 @@ bool ParseMapping (unsigned button, char *opt)
       Inform ("too many buttons (limit is %d)", buttonHWM);
       return false;
     }
-  for (unsigned ix = numButtons; ix--;)
-    if (button == mapping[ix].mouse)
-      {
-	Inform ("button %d (%s) is already specified",
-		button, ButtonName (button));
-	return false;
-      }
 
   char *plus = strchr (opt, '+');
   if (plus)
@@ -201,10 +189,10 @@ bool InitMapping ()
   // Figure out if modifier combos override any non-modifier button
   for (unsigned ix = numButtons; ix--;)
     {
-      keyState[mapping[ix].key] = KF_Used;
+      keyState[mapping[ix].key] = -1;
       if (mapping[ix].mod)
 	{
-	  keyState[mapping[ix].mod] = KF_Used;
+	  keyState[mapping[ix].mod] = -1;
 	  for (unsigned jx = numButtons; jx--;)
 	    if (!mapping[jx].mod && mapping[jx].key == mapping[ix].key)
 	      mapping[ix].override = jx + 1;
@@ -385,8 +373,7 @@ int InitUser (char const *name)
 
       uinput_user_dev udev;
       memset (&udev, 0, sizeof (udev));
-      snprintf (udev.name, UINPUT_MAX_NAME_SIZE,
-		"Keyboard Virtual Mouse Buttons");
+      snprintf (udev.name, UINPUT_MAX_NAME_SIZE, deviceName);
       udev.id.bustype = BUS_VIRTUAL;
       udev.id.vendor  = 21324; // Julian Day 2021-11-20
       udev.id.product = 0x1;
@@ -406,8 +393,7 @@ int InitUser (char const *name)
 
 bool Loop (int keyfd, int userfd)
 {
-  unsigned changed[buttonHWM * 2];
-  unsigned numChanged = 0;
+  bool anyChanged = false;
 
   constexpr unsigned maxInEv = 8;
   input_event eventsIn[maxInEv];
@@ -432,19 +418,21 @@ bool Loop (int keyfd, int userfd)
 	  if (ev->type == EV_KEY)
 	    {
 	      unsigned code = ev->code;
-	      if (ev->code < KEY_CNT && keyState[code] & KF_Used)
+	      if (ev->code < KEY_CNT && keyState[code])
 		{
-		  if (!(keyState[code] & KF_Changed))
-		    changed[numChanged++] = code;
-		  keyState[code] = ((ev->value ? KF_Down : 0)
-				    | KF_Used | KF_Changed);
+		  int state = (ev->value ? +1 : -1);
+		  if (state != keyState[code])
+		    {
+		      anyChanged = true;
+		      keyState[code] = state;
+		    }
 		}
 	    }
 	  else if (ev->type == EV_SYN)
 	    {
 	      if (ev->code == SYN_DROPPED)
 		Inform ("dropped packets");
-	      else if (ev->code == SYN_REPORT && numChanged)
+	      else if (ev->code == SYN_REPORT && anyChanged)
 		{
 		  constexpr unsigned maxOutEv = buttonHWM * 3 + 1;
 		  input_event eventsOut[maxOutEv];
@@ -455,10 +443,10 @@ bool Loop (int keyfd, int userfd)
 		  for (unsigned ix = 0; ix != numButtons; ix++)
 		    {
 		      // Add hystersis for buttons with modifiers.
-		      bool down = (keyState[mapping[ix].key] & KF_Down)
+		      bool down = (keyState[mapping[ix].key] >= 0)
 			&& (!mapping[ix].mod
 			    || mapping[ix].down
-			    || (keyState[mapping[ix].mod] & KF_Down));
+			    || (keyState[mapping[ix].mod] >= 0));
 
 		      downMask |= unsigned (down) << ix;
 		      if (mapping[ix].override && (down || mapping[ix].down))
@@ -511,10 +499,7 @@ bool Loop (int keyfd, int userfd)
 			Inform ("unexpected byte count writing");
 		    }
 
-		  // Reset the changed flags on the changed keys
-		  while (numChanged--)
-		    keyState[changed[numChanged]] &= ~KF_Changed;
-		  numChanged = 0;
+		  anyChanged = false;
 		}
 	    }
 	}      
