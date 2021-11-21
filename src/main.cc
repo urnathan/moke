@@ -454,9 +454,12 @@ bool Loop (int keyfd, int userfd)
 		  unsigned overrideMask = 0;
 		  for (unsigned ix = 0; ix != numButtons; ix++)
 		    {
+		      // Add hystersis for buttons with modifiers.
 		      bool down = (keyState[mapping[ix].key] & KF_Down)
 			&& (!mapping[ix].mod
+			    || mapping[ix].down
 			    || (keyState[mapping[ix].mod] & KF_Down));
+
 		      downMask |= unsigned (down) << ix;
 		      if (mapping[ix].override && (down || mapping[ix].down))
 			overrideMask |= 1 << mapping[ix].override;
