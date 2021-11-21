@@ -33,7 +33,7 @@ auto const ulBits = sizeof (ul_t) * charBits;
 auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
-auto const &deviceName = "Wakame Key->Btn Mapper";
+auto const &deviceName = "Wakame Key->Button Mapper";
 
 struct KeyName 
 {
@@ -574,6 +574,12 @@ Usually requires root privilege, as we muck about in /dev.
 
 int main (int argc, char *argv[])
 {
+  uid_t uid = getuid ();
+  uid_t euid = geteuid ();
+  bool issetuid = uid != euid;
+
+  if (issetuid)
+    seteuid (uid);
   if (auto const *pName = argv[0])
     {
       // set progName
@@ -634,6 +640,9 @@ int main (int argc, char *argv[])
 	}
     }
 
+  if (issetuid)
+    Verbose ("operating as setuid %u", unsigned (euid));
+
   if (!InitMapping ())
     return 1;
 
@@ -650,6 +659,10 @@ int main (int argc, char *argv[])
       Usage ();
       return 1;
     }
+
+  if (issetuid)
+    // get privileges back
+    seteuid (euid);
 
   int keyFd = FindKeyboard (keyboard);
   if (keyFd < 0)
@@ -669,6 +682,10 @@ int main (int argc, char *argv[])
 
   if (InitKeyboard (keyFd))
     devFd = InitDevice (device);
+
+  if (issetuid)
+    // and drop them again
+    seteuid (uid);
 
   if (devFd >= 0)
     {
