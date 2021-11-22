@@ -195,8 +195,18 @@ bool InitMapping ()
 	{
 	  keyState[mapping[ix].mod] = -1;
 	  for (unsigned jx = numButtons; jx--;)
-	    if (!mapping[jx].mod && mapping[jx].key == mapping[ix].key)
-	      mapping[ix].override = jx + 1;
+	    {
+	      if (mapping[jx].key == mapping[ix].mod)
+		{
+		  Inform ("%s modifier for %s chord is key for %s",
+			  KeyName (mapping[ix].mod),
+			  ButtonName (mapping[ix].mouse),
+			  ButtonName (mapping[jx].mouse));
+		  return false;
+		}
+	      if (!mapping[jx].mod && mapping[jx].key == mapping[ix].key)
+		mapping[ix].override = jx + 1;
+	    }
 	}
     }
 
