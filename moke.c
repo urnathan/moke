@@ -565,13 +565,17 @@ Options:
   -r KEYS  Keys for right
   -v	   Be verbose
 
-KEYS names one or two (separated with `+') keys. Only a small subset
-of keys are supported -- the 'windows' key and left or right ctrl or
-alt keys.  When a mouse button is emulated, the keyboard keys are
-supressed -- so the mouse button doesn't appear to be ALT+Button
-itself, for instance.
+KEYS names a main key and an optional modifier key (prefixed with
+`+'). Only a small subset of keys are supported -- the 'windows' key
+and left or right ctrl or alt keys.  When a mouse button is emulated,
+the keyboard keys are supressed -- so the mouse button doesn't appear
+to be ALT+Button itself, for instance.  A mouse button can be
+generated from more than one key combination.  If no buttons are
+specified, the default mapping is:
 
-Known keys are )", progName, inputDevDir, inputDevDir, uinputDev, inputDevDir);
+   -l Windows -m Windows+LeftAlt -m RightCtrl+RightAlt -r RightCtrl
+
+Known keys are)", progName, inputDevDir, inputDevDir, uinputDev, inputDevDir);
   for (unsigned ix = 0; keys[ix].name; ix++)
     fprintf (stream, "%s %s", &","[!ix], keys[ix].name);
 
