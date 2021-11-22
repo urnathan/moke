@@ -1,12 +1,12 @@
-// Wakame - Windows+Alt Keys As Mouse Emulation -*- mode:c++ -*-
+// Moke - Windows+Alt Keys As Mouse Emulation -*- mode:c++ -*-
 // Copyright (C) 2021 Nathan Sidwell, nathan@acm.org
 // License: Affero GPL v3.0
 
 // Although this is C++, we're only using it for syntax and staying in
-// the C subset of runtime.  From the build's PoV this is C and we do
-// not link with the C++ runtime.
+// the C subset of runtime.  From the build's PoV this is C and you'll
+// notice we link as a C program.
 
-#include "wakamecfg.h"
+#include "mokecfg.h"
 // C
 #include <stdarg.h>
 #include <stdlib.h>
@@ -34,7 +34,7 @@ auto const ulBits = sizeof (ul_t) * charBits;
 auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
-auto const &deviceName = "Wakame Key->Button Mapper";
+auto const &deviceName = "Moke Key to Button Mapper";
 
 struct KeyName 
 {
@@ -541,33 +541,45 @@ bool Loop (int keyfd, int userfd)
 
 void Usage (FILE *stream = stderr)
 {
-  fprintf (stream, R"(Keyboard Emulation of Mouse Buttons
-  Usage: %s [OPTIONS] [INPUTKEYBOARD] [OUTPUTDEVICE]
+  fprintf (stream, R"(Moke: Mouse Buttons From Keyboard
+  Usage: %s [OPTIONS] [KEYBOARD] [DEVICE]
 
-Emulate mouse buttons to OUTPUTDEVICE using INPUTDEVICE.
+Use the keyboard to emit mouse keys, for when your laptop has no
+buttons on its trackpad.
 
-MetaLeft (the window key) is the mouse button, with AltLeft and
-AltRight modifying it to buttons 2 & 3.  FIXME: Parameterize this.
-
-INPUTKEYBOARD defaults to a device in %s that reports key events and
-whose reported name ends with ` keyboard'.  You may provide either a
+KEYBOARD defaults to a device in `%s' that reports key events and
+whose reported name ends with ` keyboard'. You may provide either a
 pathname (absolute or relative to %s), or a string to partially match
-the reported device name.  Use `^' and `$' to anchor the string at the
-beginning and/or end of the reported name.
+the reported device name. Use `^' and `$' to anchor the string at the
+beginning and/or end of the reported name. (evtest and xinput can be
+used to locate keyboard names.
 
-OUTPUTDEVICE defaults to %s.
+DEVICE defaults to `%s', which will usually create a pseudo device in
+`%s', which is automatically found by the X server (even after the X
+server has started).
 
 Options:
-  -h	  Help
-  -l LEFT  Keys for left
-  -m MIDDLE Keys for middle
-  -r RIGHT Keys for right
-  -v	  Be verbose
+  -h	   Help
+  -l KEYS  Keys for left
+  -m KEYS  Keys for middle
+  -r KEYS  Keys for right
+  -v	   Be verbose
+
+KEYS names one or two (separated with `+') keys. Only a small subset
+of keys are supported -- the 'windows' key and left or right ctrl or
+alt keys.  When a mouse button is emulated, the keyboard keys are
+supressed -- so the mouse button doesn't appear to be ALT+Button
+itself, for instance.
+
+Known keys are )", progName, inputDevDir, inputDevDir, uinputDev, inputDevDir);
+  for (unsigned ix = 0; keys[ix].name; ix++)
+    fprintf (stream, "%s %s", &","[!ix], keys[ix].name);
+
+  fprintf (stream, R"(.
 
 Usually requires root privilege, as we muck about in /dev.
-
-)", progName, inputDevDir, inputDevDir, uinputDev);
-  fprintf (stream, "Version %s.\n", PROJECT_NAME " " PROJECT_VERSION);
+)");
+  fprintf (stream, "\nVersion %s.\n", PROJECT_NAME " " PROJECT_VERSION);
   if (PROJECT_URL[0])
     fprintf (stream, "See %s for more information.\n", PROJECT_URL);
 }

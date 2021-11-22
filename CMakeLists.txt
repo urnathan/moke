@@ -1,4 +1,4 @@
-# Wakame	-*- mode:cmake -*-
+# Moke	-*- mode:cmake -*-
 # Copyright (C) 2021 Nathan Sidwell, nathan@acm.org
 # License: Affero GPL v3.0
 
@@ -10,19 +10,16 @@ list (PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 if (NOT CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   message (FATAL_ERROR "Not intended as a subcomponent")
 endif ()
-project (Wakame VERSION 1.0 LANGUAGES C)
-set (PROJECT_URL "https://github.com/urnathan/wakame")
+project (Moke VERSION 1.0 LANGUAGES C)
+set (PROJECT_URL "https://github.com/urnathan/moke")
 
 include (CheckLibraryExists)
 include (CheckSymbolExists)
 
-if (NOT CMAKE_BUILD_TYPE)
-  set (CMAKE_BUILD_TYPE Debug)
-endif ()
 message (NOTICE "Build type:${CMAKE_BUILD_TYPE}")
 
-option (WAKAME_SETUID "Install setuid" OFF)
-message (NOTICE "Setuid install:${WAKAME_SETUID}")
+option (MOKE_SETUID "Install setuid" OFF)
+message (NOTICE "Setuid install:${MOKE_SETUID}")
 
 # -g3 means we get macros
 set (CMAKE_CXX_FLAGS_DEBUG -g3)
@@ -36,7 +33,7 @@ add_compile_options ("-fno-exceptions;-fno-rtti")
 
 configure_file (gdbinit.in .gdbinit ESCAPE_QUOTES)
 
-configure_file (wakamecfg.h.in wakamecfg.h ESCAPE_QUOTES)
+configure_file (mokecfg.h.in mokecfg.h ESCAPE_QUOTES)
 include_directories ("${CMAKE_CURRENT_BINARY_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -44,10 +41,10 @@ set (PERMISSIONS
   OWNER_WRITE OWNER_READ OWNER_EXECUTE
   GROUP_READ GROUP_EXECUTE
   WORLD_READ WORLD_EXECUTE)
-if (${WAKAME_SETUID})
+if (${MOKE_SETUID})
   list (APPEND PERMISSIONS SETUID)
 endif ()
 
-add_executable (wakame wakame.c)
+add_executable (moke moke.c)
 
-install (TARGETS wakame DESTINATION bin PERMISSIONS ${PERMISSIONS})
+install (TARGETS moke DESTINATION bin PERMISSIONS ${PERMISSIONS})
