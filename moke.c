@@ -206,7 +206,7 @@ bool InitMapping ()
 // See if FD is the keyboard we want.  Must match wanted and accept
 // key events.
 int IsKeyboard (int fd, char const *dir, char const *fName,
-		bool search, char const *wantedName = nullptr)
+		char const *wantedName = nullptr)
 {
   int version;
   char devName[MAXNAMLEN];
@@ -236,7 +236,7 @@ int IsKeyboard (int fd, char const *dir, char const *fName,
       return -1;
     }
 
-  if (!search)
+  if (!wantedName)
     return false;
 
   if (!(typebits & (1 << EV_KEY)))
@@ -245,7 +245,7 @@ int IsKeyboard (int fd, char const *dir, char const *fName,
       return false;
     }
 
-  if (wantedName && wantedName[0])
+  if (wantedName[0])
     {
       auto wantedLen = strlen (wantedName);
       bool anchorStart = wantedName[0] == '^';
@@ -283,13 +283,12 @@ int IsKeyboard (int fd, char const *dir, char const *fName,
 // @parm(wanted) either filename in input dir, or name fragment.
 // Fragment can be anchored at start with ^ or end with $, but it is
 // not a regexp.
-int FindKeyboard (char const *wanted = nullptr)
+int FindKeyboard (char const *wanted)
 {
   int fd = -1;
   bool ok = true;
   // If wanted looks like a pathname, assume it is.
-  bool wantPathname = wanted
-    && (wanted[wanted[0] == '.'] == '/' || !strchr (wanted, ' '));
+  bool wantPathname = wanted[wanted[0] == '.'] == '/' || !strchr (wanted, ' ');
 
   int dirfd = open (inputDevDir, O_RDONLY | O_DIRECTORY);
   DIR *dir = dirfd >= 0 ? fdopendir (dirfd) : nullptr;
@@ -306,7 +305,7 @@ int FindKeyboard (char const *wanted = nullptr)
 	    if (probe >= 0)
 	      {
 		if (auto found = IsKeyboard (probe, inputDevDir, ent->d_name,
-					     !wantPathname, wanted))
+					     wantPathname ? nullptr : wanted))
 		  {
 		    if (found < 0)
 		      ok = false;
@@ -333,7 +332,7 @@ int FindKeyboard (char const *wanted = nullptr)
       fd = openat (dirfd, wanted, O_RDONLY, 0);
       if (fd < 0)
 	Inform ("cannot open `%s': %m", wanted);
-      else if (!IsKeyboard (fd, nullptr, wanted, true, nullptr))
+      else if (!IsKeyboard (fd, nullptr, wanted, nullptr))
 	{
 	  close (fd);
 	  fd = -1;
