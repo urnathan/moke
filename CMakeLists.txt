@@ -5,8 +5,6 @@
 # Don't actually know the minimum version this'll work with, 3.18 is what I have
 cmake_minimum_required (VERSION 3.18)
 
-list (PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-
 if (NOT CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   message (FATAL_ERROR "Not intended as a subcomponent")
 endif ()
@@ -16,6 +14,9 @@ set (PROJECT_URL "https://github.com/urnathan/moke")
 include (CheckLibraryExists)
 include (CheckSymbolExists)
 
+if (NOT CMAKE_BUILD_TYPE)
+  set (CMAKE_BUILD_TYPE Release)
+endif ()
 message (NOTICE "Build type:${CMAKE_BUILD_TYPE}")
 
 # -g3 means we get macros
