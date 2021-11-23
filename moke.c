@@ -307,7 +307,7 @@ int FindKeyboard (char const *wanted)
       fd = openat (dirfd, wanted, O_RDONLY, 0);
       if (fd < 0)
 	{
-	  if (isPathname)
+	  if (isPathname || flagVerbose)
 	    Inform ("cannot open `%s': %m", wanted);
 	}
       else if (IK_Not == IsKeyboard (fd, nullptr, wanted, nullptr))

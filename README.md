@@ -13,45 +13,48 @@ I purchased an XPS 13 9310, which is a laptop whose touchpad has no
 separate physical mouse buttons. Clicking the touchpad is how you get
 LeftButton. That's problematic because:
 
-* It needs quite a forceful click, which is tiring and ...
+* It needs quite a forceful click, which is tiring and significantly
+  different from the keyboard force.
 
 * The pressure needed increases towards the edge of the touchpad, or
-  isn't even possible. There's no visible clues on the trackpad that
-  the useable area is less than its physical size.
+  isn't even forces a button release. There's no visible clues on the
+  trackpad that its useable area is less than its physical size.
 
-* It's very hard to release the button without altering location --
-  the number of times sized a window as I wanted it, and then have it
-  change when releasing :frowningface:☹
+* It's very hard to release the button without also altering the
+  location -- it's infuriating to carefully size a window, and then
+  have it change when releasing the button ☹
 
 * During a drag, if you hit the edge of the touchpad, it's
   _impossible_ to resite your finger and continue dragging.
 
 * To get MiddleButton & RightButton one has to enable multitouch,
-  which is quite problematic.
+  which is quite confusing and difficult to get exactly right.
 
 All in all, not good. A clear indicator that I would not get on with
 macbooks.
 
-However, the keyboard has a 'windows' key, which I never use (it's
-treated as LeftMeta in Linux, but still not used by me). That's
-conveniently situated just above the touchpad, so why not use that as
-LeftButton?  I can't just use the similarly convenient Left- and
-RightAlt for the other two mouse buttons, as Alt itself is needed.
-But Windows+LeftAlt and Windows+RightAlt seem a useful combination.
+However, the keyboard has a 'windows' key, which is conveniently
+situated just above the touchpad. Plus I never use as the LefMeta it
+is treated as Linux. So why not use that as LeftButton?  I can't just
+use the similarly convenient Left- and RightAlt keys for the other two
+mouse buttons, as Alt itself is needed.  But chords of Windows+LeftAlt
+and Windows+RightAlt seem a useful combination.
 
 Remapping those keys using the keymap wouldn't quite work.  I needed
-to separate different Alt and Ctrl keys, and UIs would still think the
-Alt or Ctrl was pressed when using them in a chord.  Plus I ended up
-using RightCtrl as a non-modifier mouse key, which is orthogonal to
-its use as a regular modifier key.
+to distinguish the different Alt keys, and UIs would still think the
+Alt was pressed when using them in a chord (fortunately that's
+functionality I very rarely, if ever, need).  As it happens I ended up
+using RightCtrl as the first key of some combinations, which is
+orthogonal to its use as a keypress modifier key.
 
 Hence Moke. This reads from the keyboard device and generates mouse
-button events on a created user input device that is found by the X
-server.
+button events on a created user input device, which is dynamically
+found by the X server.
 
 # Example
 
-I have the following in my .zlogin:
+In my `.zlogin` the following appears in the laptop-specific fragment:
+
 ```shell
 moke &
 ```
@@ -89,19 +92,21 @@ moke [OPTIONS] [KEYBOAD]
 ```
 
 KEYBOARD is either a pathname or a partial string match of the
-keyboard device name. As this can be ambiguous as to which is which,
-and the following heuristic is used. If KEYBOARD begins with `/` or
-`./`, it is a pathname. If it contains a space, it is a partial
-string.  Otherwise an attempt is made to open it and if that fails it
-is treated as a partial name.
+keyboard device name:
 
-File opening is relative to `/dev/input`.
+* Non-absolute pathnames are relative to `/dev/input`.
 
-For find-by name, the `/dev/input` directory is scanned looking for
-exactly one EVIO keyboard device that matches the partial name.  The
-partial name can be anchored to the start of a device name with `^`,
-and anchored to the end with `$` -- but it is _not_ a regexp.  Use `^`
-and `$` to force an exact match.
+* When name matching, the `/dev/input` directory is scanned looking
+for exactly one EVIO keyboard device that matches the partial name.
+The partial name can be anchored to the start of a device name with
+`^`, and anchored to the end with `$` -- but it is _not_ a regexp.
+Use both `^` and `$` to force an exact match.
+
+* A heuristic is used to distinguish pathnames from partial names. If
+KEYBOARD begins with `/` or `./`, it is only considered a
+pathname. Otherwise, if it contains a space, it is only considered a
+partial string.  Otherwise an attempt is made as a pathname, and if
+that fails it is treated as a partial name.
 
 The OPTIONS are:
 
@@ -121,20 +126,24 @@ A key combination is either a one or two key names, separated by a
 another mouse button, the chord will take priority.  There is also
 hysteresis for chords where the second key does not need to remain
 pressed for the duration of the emulated mouse button press.  In
-addition to emulating mouse buttons, the keys for that button are
+addition to emulating mouse buttons, the keys of that button are
 emulated as released. This allows an Alt key to participate in a mouse
 button chord, but not cause applications to consider you as pressing
 Mouse+Alt.  If you need Mouse+Alt functionality you will need to also
 press the other Alt button.
 
+Moke only knows the names and aliases of a few keys, there's no point
+allowing full generality here: Windows, LeftAlt, RightAlt, LeftCtrl,
+RightCtrl, LeftMeta, Alt_L, Ctrl_L, Super_L, Alt_R, Ctrl_R.
+
 # Defaults
 
-The default keyboard match used if no KEYBOARD argument is provided.
-It is ` keyboard$`, which as explained above anchors the partial name
-to the end of the device's name.  All my laptops report a keyboard
-named `AT Translated Set 2 keyboard`, and the final word is
-sufficiently unique. To provide an empty partial name, and avoid the
-default, use an empty string for the argument (`''`).
+If no KEYBOARD argument is provided, a default of ` keyboard$` is
+used. As explained above this is anchored to the end of the device's
+name.<a href="#1"><sup>1</sup></a> To provide an empty partial name,
+and avoid the default, use an empty string for the argument (`''`),
+but that is very unlikely to work as many input devices generate key
+presses.
 
 If no `-l`, `-m` or `-r` options are given, a default mapping is
 provided. It is:
@@ -144,17 +153,26 @@ provided. It is:
 * RightCtrl+RightAlt -> MiddleButton
 * RightCtrl -> RightMouse
 
-These mappings mean the RightCtrl key is not otherwise useable -- but
-I remap the CapsLock key to Ctrl functionality.<a
-href="#1"><sup>1</sup></a> The chords needed for MiddleButton can be
+These mappings mean the RightCtrl key is not otherwise useable.<a
+href="#2"><sup>2</sup></a> The chords needed for MiddleButton can be
 done with one hand -- leaving the other to operate the touchpad
 itself.
 
 # Errors
 
-Moke's error messages should be clear enough.  It does not permit more
-than one instance of the Moke device.  It reminds you if it is not
-running as root, and cannot find a device.
+Moke's error messages should be clear enough.  Here are some of the checks:
+
+* It does not permit more than one instance of the Moke device.
+
+* If it cannot find a device and is not running as root, it give you a
+  reminder.
+
+* It makes sure that exactly one device matches the partial name.  As
+  the iteration ordering is unspecified you cannot rely on first-find
+  behavior.
+
+* It does not permit a chord's second key to be the first key of
+  another combination.
 
 # Setuid
 
@@ -167,7 +185,17 @@ installing.
 When moke detects it is running with setuid priviledges, it drops them
 as soon as possible.
 
---
+# Implementation
 
-<a name="1">1</a>: _Where it always should be._ Why do we still have
-CapsLock anyway?
+Moke is syntactically C++, but dynamically C. In other words it only
+needs the C library and does not link against the C++ runtime. From
+CMake's PoV it _is_ C and I rely on compiler options to tell it to
+compile as unexceptional C++17.
+
+---
+
+<a name="1">1</a>: All my laptops report their keyboard as `AT
+Translated Set 2 keyboard`, and the final word is sufficiently unique.
+
+<a name="2">2</a>: I use a remapped CapsLock key for the Ctrl
+modifier, so no loss there.
