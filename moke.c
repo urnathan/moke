@@ -392,8 +392,8 @@ bool InitKeyboard (int fd)
       if (auto key = (&mapping[ix].key)[jx])
 	if (!TestBit (bits, key))
 	  {
-	    Inform ("keyboard does not generate key %d (%s)",
-		    key, KeyName (key));
+	    Inform ("keyboard does not generate %s (code %d)",
+		    KeyName (key), key);
 	    return false;
 	  }
 
@@ -511,8 +511,7 @@ bool Loop (int keyfd, int userfd)
 		      if (down != mapping[ix].down)
 			{
 			  // This button has changed state.
-			  Verbose ("mouse %d (%s) is %s", mapping[ix].mouse,
-				   ButtonName (mapping[ix].mouse),
+			  Verbose ("%s is %s", ButtonName (mapping[ix].mouse),
 				   down ? "pressed" : "released");
 			  mapping[ix].down = down;
 			  *out = *ev;

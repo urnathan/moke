@@ -1,7 +1,11 @@
 # Moke
-Mouse from Keyboard
+
+Mouse/Keyboard: Emulate Mouse Buttons Using Keyboard
 
 Copyright (C) 2021 Nathan Sidwell, nathan@acm.org
+
+Do you wish your buttonless touch pad had buttons? This is the widget
+for you.
 
 # Backstory
 
@@ -57,6 +61,29 @@ laptop's keyboard and creates a Moke device, which is subsequently
 picked up when the X server starts. This use requires moke to be
 installed setuid, see below.
 
+`xinput` shows the keyboard and moke device:
+
+```shell
+> xinput   
+...
+⎣ Virtual core keyboard                   	id=3	[master keyboard (2)]
+    ...
+    ↳ AT Translated Set 2 keyboard            	id=15	[slave  keyboard (3)]
+    ↳ Moke Key to Button Mapper               	id=18	[slave  keyboard (3)]
+
+```
+
+`evtest` can also find it:
+```shell
+>sudo evtest
+No device specified, trying to scan all of /dev/input/event*
+Available devices:
+...
+/dev/input/event2:	AT Translated Set 2 keyboard
+...
+/dev/input/event17:	Moke Key to Button Mapper
+```
+
 # Usage
 ```shell
 moke [OPTIONS] [KEYBOAD]
@@ -77,24 +104,58 @@ partial name can be anchored to the start of a device name with `^`,
 and anchored to the end with `$` -- but it is _not_ a regexp.  Use `^`
 and `$` to force an exact match.
 
+The OPTIONS are:
+
+* `-h` Help text.
+
+* `-l` Keys for LeftButton.
+
+* `-m` Keys for MiddleButton.
+
+* `-r` Keys for RightButton.
+
+* `-v` Be verbose.  Provides helpful diagnostics about device names
+  and mouse button emulation.
+
+A key combination is either a one or two key names, separated by a
+`+`.  If a the first key of a two-key chord is also the single key for
+another mouse button, the chord will take priority.  There is also
+hysteresis for chords where the second key does not need to remain
+pressed for the duration of the emulated mouse button press.  In
+addition to emulating mouse buttons, the keys for that button are
+emulated as released. This allows an Alt key to participate in a mouse
+button chord, but not cause applications to consider you as pressing
+Mouse+Alt.  If you need Mouse+Alt functionality you will need to also
+press the other Alt button.
+
 # Defaults
 
-The default keyboard match is ` keyboard$`, which as explained above
-anchors a case-insensitive test to the end of the keyboard's name.
-All my laptops report a keyboard named `AT Translated Set 2 keyboard`,
-and the final word is sufficiently unique.
+The default keyboard match used if no KEYBOARD argument is provided.
+It is ` keyboard$`, which as explained above anchors the partial name
+to the end of the device's name.  All my laptops report a keyboard
+named `AT Translated Set 2 keyboard`, and the final word is
+sufficiently unique. To provide an empty partial name, and avoid the
+default, use an empty string for the argument (`''`).
 
-The default mapping I use is:
+If no `-l`, `-m` or `-r` options are given, a default mapping is
+provided. It is:
 
 * Windows -> LeftButton
 * Windows+LeftAlt -> MiddleButton
 * RightCtrl+RightAlt -> MiddleButton
 * RightCtrl -> RightMouse
 
-This means the RightCtrl key is not otherwise useable -- but I remap
-the CapsLock key to Ctrl functionality.<a href="#1"><sup>1</sup></a>
-The chords needed for MiddleButton can be done with one hand --
-leaving the other to operate the touchpad itself.
+These mappings mean the RightCtrl key is not otherwise useable -- but
+I remap the CapsLock key to Ctrl functionality.<a
+href="#1"><sup>1</sup></a> The chords needed for MiddleButton can be
+done with one hand -- leaving the other to operate the touchpad
+itself.
+
+# Errors
+
+Moke's error messages should be clear enough.  It does not permit more
+than one instance of the Moke device.  It reminds you if it is not
+running as root, and cannot find a device.
 
 # SetUid
 
