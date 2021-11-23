@@ -21,7 +21,7 @@ LeftButton. That's problematic because:
 
 * It's very hard to release the button without altering location --
   the number of times sized a window as I wanted it, and then have it
-  change when releasing ☹
+  change when releasing :frowningface:☹
 
 * During a drag, if you hit the edge of the touchpad, it's
   _impossible_ to resite your finger and continue dragging.
@@ -58,8 +58,7 @@ moke &
 
 Because Moke's defaults work for me (funny heh?), that finds the
 laptop's keyboard and creates a Moke device, which is subsequently
-picked up when the X server starts. This use requires moke to be
-installed setuid, see below.
+picked up when the X server starts.
 
 `xinput` shows the keyboard and moke device:
 
@@ -157,17 +156,18 @@ Moke's error messages should be clear enough.  It does not permit more
 than one instance of the Moke device.  It reminds you if it is not
 running as root, and cannot find a device.
 
-# SetUid
+# Setuid
 
 Both the `/dev/uinput` device and `/dev/input` directory are not
-useable by non-root users. Thus you either need to run `moke` under
-`sudo`, or as setuid. For the latter you must configure with
-`-DMOKE_SETUID=1` and then either install as root, or do a bit of
-manual alteration after installing. It's either that or some sudo
-fiddling or repetitive password typing.
+useable by non-root users. Thus moke is expected to be installed
+setuid (`chmod u+s moke`). For this to be effective, either install as
+root, or do a bit of manual `chown`/`chmod` alteration after
+installing.
 
-When moke detects it is running with elevated privileges, it drops
-them as soon as possible.
+When moke detects it is running with setuid priviledges, it drops them
+as soon as possible.
+
+--
 
 <a name="1">1</a>: _Where it always should be._ Why do we still have
 CapsLock anyway?

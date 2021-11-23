@@ -18,9 +18,6 @@ include (CheckSymbolExists)
 
 message (NOTICE "Build type:${CMAKE_BUILD_TYPE}")
 
-option (MOKE_SETUID "Install setuid" OFF)
-message (NOTICE "Setuid install:${MOKE_SETUID}")
-
 # -g3 means we get macros
 set (CMAKE_CXX_FLAGS_DEBUG -g3)
 set (CMAKE_CXX_FLAGS_RELWITHDEBINFO
@@ -40,10 +37,8 @@ include_directories ("${CMAKE_CURRENT_BINARY_DIR}"
 set (PERMISSIONS
   OWNER_WRITE OWNER_READ OWNER_EXECUTE
   GROUP_READ GROUP_EXECUTE
-  WORLD_READ WORLD_EXECUTE)
-if (${MOKE_SETUID})
-  list (APPEND PERMISSIONS SETUID)
-endif ()
+  WORLD_READ WORLD_EXECUTE
+  SETUID)
 
 add_executable (moke moke.c)
 

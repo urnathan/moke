@@ -616,6 +616,7 @@ int main (int argc, char *argv[])
 
   if (issetuid)
     seteuid (uid);
+
   if (auto const *pName = argv[0])
     {
       // set progName
