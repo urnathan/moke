@@ -35,6 +35,7 @@ auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
 auto const &deviceName = "Moke Key to Button Mapper";
+unsigned const eventHWM = 16;
 
 struct KeyName 
 {
@@ -215,24 +216,28 @@ bool InitMapping ()
 
 // See if FD is the keyboard we want.  Must match wanted and accept
 // key events.
-enum IKC {IK_Not, IK_Moke, IK_OK, IK_Matched};
+enum IKC {IK_Not, IK_Moke, IK_OK, IK_Bad};
 
 IKC IsKeyboard (int fd, char const *dir, char const *fName,
 		char const *wantedName = nullptr)
 {
   int version;
-  char devName[MAXNAMLEN];
-  int sDevLen;
-  unsigned long typebits;
-
-  if (ioctl (fd, EVIOCGVERSION, &version) < 0
-      || (sDevLen = ioctl (fd, EVIOCGNAME (sizeof (devName)), devName)) < 0
-      || ioctl (fd, EVIOCGBIT (0, EV_CNT), &typebits) < 0)
+  if (ioctl (fd, EVIOCGVERSION, &version) < 0)
     {
+    not_evio:
       if (!dir || wantedName)
 	Verbose ("rejecting `%s': not an EVIO device", fName);
       return IK_Not;
     }
+
+  char devName[MAXNAMLEN];
+  int sDevLen = ioctl (fd, EVIOCGNAME (sizeof (devName)), devName);
+  if (sDevLen < 0)
+    goto not_evio;
+
+  unsigned long typebits;
+  if (ioctl (fd, EVIOCGBIT (0, EV_CNT), &typebits) < 0)
+    goto not_evio;
 
   // The name length includes the trailing NUL, check it
   unsigned devLen = unsigned (sDevLen);
@@ -244,18 +249,46 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
     }
   devLen--; // Make it the usual len we care about
 
-  if (!(typebits & (1 << EV_KEY)))
-    {
-      if (!dir || wantedName)
-	Verbose ("rejecting `%s' (%s): not a keyboard", fName, devName);
-      return IK_Not;
-    }
-
   if (dir && !strcmp (devName, deviceName))
     {
       Inform ("already present at `%s/%s'", dir, fName);
       return IK_Moke;
     }
+
+  // Must generate EV_KEY and not generate non-keyboard-like events
+  if (!(typebits & (1u << EV_KEY))
+      || (typebits & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
+		       | (1u << EV_REP) | (1u << EV_LED))))
+    {
+    not_keyboard:
+      if (!dir || wantedName)
+	Verbose ("rejecting `%s' (%s): not a keyboard", fName, devName);
+      return IK_Not;
+    }
+
+  // Check some usual keyboard keys are generated
+  static unsigned char const someKeys[]
+    = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P,
+    KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L,
+    KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M,
+    0};
+
+  if (typebits & (1u << EV_MSC))
+    {
+      // Only MSC event we deal with is MSC_SCAN
+      ul_t mscBits;
+      if (ioctl (fd, EVIOCGBIT (EV_MSC, MSC_CNT), &mscBits) < 0)
+	goto not_evio;
+      if (mscBits & ~(1u << MSC_SCAN))
+	goto not_keyboard;
+    }
+
+  ul_t keyBits[(KEY_CNT + ulBits - 1) / ulBits];
+  if (ioctl (fd, EVIOCGBIT (EV_KEY, KEY_CNT), keyBits) < 0)
+    goto not_evio;
+  for (unsigned char const *keyPtr = someKeys; *keyPtr; keyPtr++)
+    if (!TestBit (keyBits, *keyPtr))
+      goto not_keyboard;
 
   if (wantedName && wantedName[0])
     {
@@ -289,7 +322,17 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
   if (!dir || wantedName)
     Verbose ("found keyboard `%s' (%s)", fName, devName);
 
-  return wantedName ? IK_Matched : IK_OK;
+  for (unsigned ix = numButtons; ix--;)
+    for (unsigned jx = 0; jx != 2; jx++)
+      if (auto key = (&mapping[ix].key)[jx])
+	if (!TestBit (keyBits, key))
+	  {
+	    Inform ("keyboard does not generate %s (code %d)",
+		    KeyName (key), key);
+	    return IK_Bad;
+	  }
+
+  return IK_OK;
 }
 
 // Find and open the keyboard, return an fd or -1 on failure.
@@ -300,6 +343,7 @@ int FindKeyboard (char const *wanted)
 {
   int fd = -1;
   int dirfd = open (inputDevDir, O_RDONLY | O_DIRECTORY);
+  bool ok = true;
 
   bool isPathname = wanted[wanted[0] == '.'] == '/';
   if (isPathname || !strchr (wanted, ' '))
@@ -310,19 +354,27 @@ int FindKeyboard (char const *wanted)
 	  if (isPathname || flagVerbose)
 	    Inform ("cannot open `%s': %m", wanted);
 	}
-      else if (IK_Not == IsKeyboard (fd, nullptr, wanted, nullptr))
+      else
 	{
-	  close (fd);
-	  fd = -1;
+	  auto is = IsKeyboard (fd, nullptr, wanted, nullptr);
+	  if (is == IK_Not)
+	    {
+	      close (fd);
+	      fd = -1;
+	    }
+	  else
+	    {
+	      if (is == IK_Bad)
+		ok = false;
+	      isPathname = true;
+	    }
 	}
-      isPathname = fd >= 0;
     }
 
   if (DIR *dir = fdopendir (dirfd))
     {
       // Scan the directory looking for a keyboard and checking we're
       // not already installed.
-      bool ok = true;
 
       while (struct dirent const *ent = readdir (dir))
 	if (ent->d_type == DT_CHR)
@@ -331,18 +383,15 @@ int FindKeyboard (char const *wanted)
 	    int probe = openat (dirfd, ent->d_name, O_RDONLY, 0);
 	    if (probe >= 0)
 	      {
-		switch (IsKeyboard (probe, inputDevDir, ent->d_name,
-				    isPathname ? nullptr : wanted))
+		auto is = IsKeyboard (probe, inputDevDir, ent->d_name,
+				      isPathname ? nullptr : wanted);
+		if (is == IK_Moke)
+		  // We're already running
+		  ok = false;
+		else if (is != IK_Not && !isPathname)
 		  {
-		  case IK_Not:
-		    break;
-		  case IK_Moke:
-		    // We're already running
-		    ok = false;
-		    break;
-		  case IK_OK:
-		    break;
-		  case IK_Matched:
+		    if (is == IK_Bad)
+		      ok = false;
 		    if (fd >= 0)
 		      {
 			Inform ("multiple devices found"
@@ -351,24 +400,22 @@ int FindKeyboard (char const *wanted)
 		      }
 		    else
 		      fd = probe;
-		    break;
 		  }
 
 		if (probe != fd)
 		  close (probe);
 	      }
 	  }
-
-      if (!ok)
-	{
-	  close (fd);
-	  fd = -2;
-	}
-
       closedir (dir);
     }
   else
     Inform ("cannot open %s: %m", inputDevDir);
+
+  if (!ok)
+    {
+      close (fd);
+      fd = -2;
+    }
 
   return fd;
 }
