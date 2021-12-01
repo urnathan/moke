@@ -1,3 +1,4 @@
+[//]: grip
 # Moke
 
 Mouse/Keyboard: Emulate Mouse Buttons Using Keyboard
@@ -47,9 +48,11 @@ functionality I very rarely, if ever, need).  As it happens I ended up
 using RightCtrl as the first key of some combinations, which is
 orthogonal to its use as a keypress modifier key.
 
-Hence Moke. This reads from the keyboard device and generates mouse
-button events on a created user input device, which is dynamically
-found by the X server.
+Hence Moke. This reads the keyboard device and generates mouse button
+events on a created user input device, which is dynamically found by
+the X server.  It actually grabs the keyboard and proxys its key
+events too, after filtering out those that activate the emulated mouse
+buttons.
 
 ## Example
 
@@ -66,12 +69,14 @@ picked up when the X server starts.
 `xinput` shows the keyboard and Moke device:
 
 ```shell
-> xinput   
+> xinput
+⎡ Virtual core pointer                    	id=2	[master pointer  (3)]
 ...
+⎜   ↳ Moke Proxying AT Translated Set 2 keyboard	id=17	[slave  pointer  (2)]
 ⎣ Virtual core keyboard                   	id=3	[master keyboard (2)]
     ...
     ↳ AT Translated Set 2 keyboard            	id=15	[slave  keyboard (3)]
-    ↳ Moke Key to Button Mapper               	id=18	[slave  keyboard (3)]
+    ↳ Moke Proxying AT Translated Set 2 keyboard   	id=18	[slave  keyboard (3)]
 
 ```
 
@@ -83,7 +88,7 @@ Available devices:
 ...
 /dev/input/event2:	AT Translated Set 2 keyboard
 ...
-/dev/input/event17:	Moke Key to Button Mapper
+/dev/input/event6:	Moke Proxying AT Translated Set 2 keyboard
 ```
 
 ## Usage
@@ -98,10 +103,11 @@ keyboard device name:
 * Non-absolute pathnames are relative to `/dev/input`.
 
 * When name matching, the `/dev/input` directory is scanned looking
-for exactly one EVIO keyboard device that matches the partial name.
-The partial name can be anchored to the start of a device name with
-`^`, and anchored to the end with `$` &mdash; but it is _not_ a regexp.
-Use both `^` and `$` to force an exact match.
+for exactly one EVIO keyboard device that matches the partial
+name. Devices that do not report keys [A-Z] are not considered
+keyboards. The partial name can be anchored to the start of a device
+name with `^`, and anchored to the end with `$` &mdash; but it is
+_not_ a regexp.  Use both `^` and `$` to force an exact match.
 
 * A heuristic is used to distinguish pathnames from partial names. If
 KEYBOARD begins with `/` or `./`, it is only considered a
@@ -198,15 +204,14 @@ needs the C library and does not link against the C++ runtime. From
 CMake's PoV it _is_ C and I rely on compiler options to tell it to
 compile as unexceptional C++17.
 
-There is a potential race condition between a key's press event from
-the keyboard and its release event from Moke.  These have the same
-timestamp, and so are unordered from the PoV of the key handling core.
-AFAICT the release is treated second, which is what is needed.  I
-suspect the keyboard's press events arrive before Moke's release
-events, because the latter are generated from the former anyway.  I
-was fearful Moke would have to grab the keyboard and proxy all its
-events in order to delete unwanted press events, or append a release
-before the sync event.
+Moke was slightly more complicated than I'd originally hoped. We have
+to proxy all the keys from the keyboard, so that we can filter out key
+press events and insert key release events for the modifier keys that
+are used to activate mouse buttons.  The input core maintains
+per-device state for pressed keys, and uses that to remove (say)
+release events on a not-pressed key.  So we can't just inject releases
+on a new input device.  That's also why we grab the keyboard &mdash; we
+don't want its key events making it to other downstream consumers.
 
 ---
 

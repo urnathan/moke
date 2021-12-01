@@ -34,8 +34,7 @@ auto const ulBits = sizeof (ul_t) * charBits;
 auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
-auto const &deviceName = "Moke Key to Button Mapper";
-unsigned const eventHWM = 16;
+auto const &deviceName = "Moke Proxying ";
 
 struct KeyName 
 {
@@ -75,15 +74,24 @@ namespace
 char const *progName = "";
 bool flagVerbose = false;
 
+struct DeviceInfo
+{
+  char name[UINPUT_MAX_NAME_SIZE];
+  ul_t keyMask[(KEY_CNT + ulBits - 1) / ulBits];
+};
+
+// -1: wanted, not pressed
+// +1: wanted, pressed
+// 0: not wanted
 signed char keyState[KEY_CNT];
 
 struct Map
 {
-  unsigned mouse; // the mouse BTN to emit
-  unsigned key;  // the keyboard KEY we want
-  unsigned mod;  // keyboard modifier, if any
-  char override; // overrides a non-modified button
+  unsigned short mouse; // the mouse BTN to emit
+  unsigned short key;  // the keyboard KEY we want
+  unsigned short mod;  // keyboard modifier, if any
 
+  char override; // overrides a non-modified button
   bool down; // whether we consider this pressed
 };
 
@@ -170,14 +178,13 @@ bool ParseMapping (unsigned button, char *opt)
 	}
     }
 
-  if (code)
-    numButtons++;
-  else
+  if (!code)
     {
       Inform ("unknown key `%s'", opt);
       return false;
     }
 
+  numButtons++;
   return true;
 }
 
@@ -218,7 +225,7 @@ bool InitMapping ()
 // key events.
 enum IKC {IK_Not, IK_Moke, IK_OK, IK_Bad};
 
-IKC IsKeyboard (int fd, char const *dir, char const *fName,
+IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
 		char const *wantedName = nullptr)
 {
   int version;
@@ -230,13 +237,13 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
       return IK_Not;
     }
 
-  char devName[MAXNAMLEN];
+  char devName[UINPUT_MAX_NAME_SIZE];
   int sDevLen = ioctl (fd, EVIOCGNAME (sizeof (devName)), devName);
   if (sDevLen < 0)
     goto not_evio;
 
-  unsigned long typebits;
-  if (ioctl (fd, EVIOCGBIT (0, EV_CNT), &typebits) < 0)
+  ul_t typeMask = 0;
+  if (ioctl (fd, EVIOCGBIT (0, EV_CNT), &typeMask) < 0)
     goto not_evio;
 
   // The name length includes the trailing NUL, check it
@@ -249,15 +256,15 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
     }
   devLen--; // Make it the usual len we care about
 
-  if (dir && !strcmp (devName, deviceName))
+  if (dir && !strncmp (devName, deviceName, sizeof (deviceName) - 1))
     {
       Inform ("already present at `%s/%s'", dir, fName);
       return IK_Moke;
     }
 
   // Must generate EV_KEY and not generate non-keyboard-like events
-  if (!(typebits & (1u << EV_KEY))
-      || (typebits & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
+  if (!(typeMask & (1u << EV_KEY))
+      || (typeMask & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
 		       | (1u << EV_REP) | (1u << EV_LED))))
     {
     not_keyboard:
@@ -266,28 +273,19 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
       return IK_Not;
     }
 
+  ul_t keyMask[(KEY_CNT + ulBits - 1) / ulBits];
+  memset (keyMask, 0, sizeof (keyMask));
+  if (ioctl (fd, EVIOCGBIT (EV_KEY, KEY_CNT), keyMask) < 0)
+    goto not_evio;
+
   // Check some usual keyboard keys are generated
   static unsigned char const someKeys[]
     = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P,
     KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L,
     KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M,
     0};
-
-  if (typebits & (1u << EV_MSC))
-    {
-      // Only MSC event we deal with is MSC_SCAN
-      ul_t mscBits;
-      if (ioctl (fd, EVIOCGBIT (EV_MSC, MSC_CNT), &mscBits) < 0)
-	goto not_evio;
-      if (mscBits & ~(1u << MSC_SCAN))
-	goto not_keyboard;
-    }
-
-  ul_t keyBits[(KEY_CNT + ulBits - 1) / ulBits];
-  if (ioctl (fd, EVIOCGBIT (EV_KEY, KEY_CNT), keyBits) < 0)
-    goto not_evio;
   for (unsigned char const *keyPtr = someKeys; *keyPtr; keyPtr++)
-    if (!TestBit (keyBits, *keyPtr))
+    if (!TestBit (keyMask, *keyPtr))
       goto not_keyboard;
 
   if (wantedName && wantedName[0])
@@ -325,12 +323,15 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
   for (unsigned ix = numButtons; ix--;)
     for (unsigned jx = 0; jx != 2; jx++)
       if (auto key = (&mapping[ix].key)[jx])
-	if (!TestBit (keyBits, key))
+	if (!TestBit (keyMask, key))
 	  {
 	    Inform ("keyboard does not generate %s (code %d)",
 		    KeyName (key), key);
 	    return IK_Bad;
 	  }
+
+  memcpy (info->name, devName, devLen + 1);
+  memcpy (info->keyMask, keyMask, sizeof (info->keyMask));
 
   return IK_OK;
 }
@@ -339,7 +340,7 @@ IKC IsKeyboard (int fd, char const *dir, char const *fName,
 // @parm(wanted) either filename in input dir, or name fragment.
 // Fragment can be anchored at start with ^ or end with $, but it is
 // not a regexp.
-int FindKeyboard (char const *wanted)
+int FindKeyboard (DeviceInfo *info, char const *wanted)
 {
   int fd = -1;
   int dirfd = open (inputDevDir, O_RDONLY | O_DIRECTORY);
@@ -356,7 +357,7 @@ int FindKeyboard (char const *wanted)
 	}
       else
 	{
-	  auto is = IsKeyboard (fd, nullptr, wanted, nullptr);
+	  auto is = IsKeyboard (info, fd, nullptr, wanted, nullptr);
 	  if (is == IK_Not)
 	    {
 	      close (fd);
@@ -383,7 +384,7 @@ int FindKeyboard (char const *wanted)
 	    int probe = openat (dirfd, ent->d_name, O_RDONLY, 0);
 	    if (probe >= 0)
 	      {
-		auto is = IsKeyboard (probe, inputDevDir, ent->d_name,
+		auto is = IsKeyboard (info, probe, inputDevDir, ent->d_name,
 				      isPathname ? nullptr : wanted);
 		if (is == IK_Moke)
 		  // We're already running
@@ -420,189 +421,224 @@ int FindKeyboard (char const *wanted)
   return fd;
 }
 
-// Verify keyboard has the keys we need.
-bool InitKeyboard (int fd)
+int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
 {
-  // Try grabbing it to check no one else is
-  int rc = ioctl (fd, EVIOCGRAB, reinterpret_cast<void *> (1));
-  ioctl (fd, EVIOCGRAB, reinterpret_cast<void *> (0));
+  // We need to grab, as we're filtering keypresses.  Fortunately
+  // we'll automatically ungrab when we terminate, by whatever
+  // mechanism.
+  int rc = ioctl (keyFd, EVIOCGRAB, reinterpret_cast<void *> (1));
   if (rc < 0)
     {
       Inform ("keyboard is grabbed by another process");
-      return false;
+      return -1;
     }
-  
-  ul_t bits[(KEY_CNT + ulBits - 1) / ulBits];
-  ioctl(fd, EVIOCGBIT(EV_KEY, KEY_CNT), bits);
-  for (unsigned ix = numButtons; ix--;)
-    for (unsigned jx = 0; jx != 2; jx++)
-      if (auto key = (&mapping[ix].key)[jx])
-	if (!TestBit (bits, key))
-	  {
-	    Inform ("keyboard does not generate %s (code %d)",
-		    KeyName (key), key);
-	    return false;
-	  }
 
-  // FIXME: can/should we disable the modifierness/repeatness of the key?
-  return true;
-}
-
-int InitDevice (char const *name)
-{
-  int fd = open (name, O_WRONLY | O_NONBLOCK);
+  int fd = open (name, O_WRONLY);
   if (fd < 0)
-    Inform ("cannot open output `%s': %m", name);
-  else if (ioctl (fd, UI_SET_EVBIT, EV_KEY) < 0)
     {
     fail:
-      Inform ("cannot initialize `%s': %m", name);
+      Inform ("cannot %s output `%s': %m", fd < 0 ? "open" : "initialize", name);
       close (fd);
-      fd = -1;
+      return -1;
     }
-  else
-    {
-      for (unsigned ix = numButtons; ix--;)
-	if (ioctl(fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
-	  goto fail;
-      for (unsigned ix = KEY_CNT; ix--;)
-	if (keyState[ix] && ioctl(fd, UI_SET_KEYBIT, ix) < 0)
-	  goto fail;
 
-      uinput_user_dev udev;
-      memset (&udev, 0, sizeof (udev));
-      snprintf (udev.name, UINPUT_MAX_NAME_SIZE, deviceName);
-      udev.id.bustype = BUS_VIRTUAL;
-      udev.id.vendor  = 21324; // Julian Day 2021-11-20
-      udev.id.product = 0x1;
-      unsigned vmaj, vmin;
-      sscanf (PROJECT_VERSION, "%u.%u", &vmaj, &vmin);
-      udev.id.version = vmaj * 1000 + vmin;
+  if (ioctl (fd, UI_SET_EVBIT, EV_KEY) < 0)
+    goto fail;
+  for (unsigned ix = numButtons; ix--;)
+    if (ioctl (fd, UI_SET_KEYBIT, mapping[ix].mouse) < 0)
+      goto fail;
+  for (unsigned ix = KEY_CNT; ix--;)
+    if (TestBit (info->keyMask, ix) && ioctl (fd, UI_SET_KEYBIT, ix) < 0)
+      goto fail;
 
-      if (write (fd, &udev, sizeof (udev)) < 0)
-	goto fail;
+  uinput_user_dev udev;  
+#if __GCC__ && !__clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+  // Yes, we know there might be overrun, that's why we're using snprintf
+  snprintf (udev.name, sizeof (udev.name), "%s%s", deviceName, info->name);
+#if __GCC__ && !__clang__
+#pragma GCC diagnostic pop
+#endif
+  udev.id.bustype = BUS_VIRTUAL;
+  udev.id.vendor  = 21324; // Julian Day 2021-11-20
+  udev.id.product = 0x1;
+  unsigned vmaj, vmin;
+  sscanf (PROJECT_VERSION, "%u.%u", &vmaj, &vmin);
+  udev.id.version = vmaj * 1000 + vmin;
 
-      if (ioctl (fd, UI_DEV_CREATE) < 0)
-	goto fail;
-    }
+  if (write (fd, &udev, sizeof (udev)) < 0)
+    goto fail;
+
+  if (ioctl (fd, UI_DEV_CREATE) < 0)
+    goto fail;
 
   return fd;
 }
 
-bool Loop (int keyfd, int userfd)
+void Loop (int keyFd, int userFd)
 {
-  bool anyChanged = false;
+  enum PKF {PK_None, PK_Changed, PK_Resync};
+  auto flags = PK_None;
 
   constexpr unsigned maxInEv = 8;
-  input_event eventsIn[maxInEv];
-
   for (;;)
     {
-      int cnt = read (keyfd, eventsIn, sizeof (eventsIn));
-      if (cnt < 0)
+      input_event events[maxInEv + buttonHWM];
+      int bytes = read (keyFd, events, sizeof (events));
+      if (bytes < 0)
 	{
-	  Inform ("error reading keyboard: %m");
-	  return false;
+	  Inform ("error reading device: %m");
+	  break;
 	}
-      for (auto const *ev = eventsIn; cnt; ev++)
+
+      auto *base = events, *ev = base, *ptr = base;
+
+      for (auto *next = ev; bytes > 0; ev = next, bytes -= sizeof (*ev))
 	{
-	  cnt -= sizeof (*ev);
-	  if (cnt < 0)
+	  next = ev + 1;
+	  switch (ev->type)
 	    {
-	      Inform ("unexpected byte count reading keyboard");
-	      return false;
-	    }
+	    default:
+	      // Drop
+	    elide:
+	      if (ev == base)
+		base = ptr = next;
+	      break;
 
-	  if (ev->type == EV_KEY)
-	    {
-	      unsigned code = ev->code;
-	      if (ev->code < KEY_CNT && keyState[code])
-		{
-		  int state = (ev->value ? +1 : -1);
-		  if (state != keyState[code])
-		    {
-		      anyChanged = true;
-		      keyState[code] = state;
-		    }
-		}
-	    }
-	  else if (ev->type == EV_SYN)
-	    {
-	      if (ev->code == SYN_DROPPED)
-		Inform ("dropped packets");
-	      else if (ev->code == SYN_REPORT && anyChanged)
-		{
-		  constexpr unsigned maxOutEv = buttonHWM * 3 + 1;
-		  input_event eventsOut[maxOutEv];
+	    case EV_KEY:
+	      {
+		unsigned code = ev->code;
 
-		  auto *out = eventsOut;
-		  unsigned downMask = 0;
-		  unsigned overrideMask = 0;
-		  for (unsigned ix = 0; ix != numButtons; ix++)
-		    {
-		      // Add hystersis for buttons with modifiers.
-		      bool down = (keyState[mapping[ix].key] >= 0)
-			&& (!mapping[ix].mod
-			    || mapping[ix].down
-			    || (keyState[mapping[ix].mod] >= 0));
+		if (ev->code < KEY_CNT && keyState[code] && flags != PK_Resync)
+		  {
+		    if (ev->value == 2)
+		      goto elide;
+		    else if (bool (ev->value) != (keyState[code] >= 0))
+		      {
+			flags = PK_Changed;
+			keyState[code] = -keyState[code];
+		      }
+		  }
 
-		      downMask |= unsigned (down) << ix;
-		      if (mapping[ix].override && (down || mapping[ix].down))
-			overrideMask |= 1 << mapping[ix].override;
-		    }
-		  downMask &= ~(overrideMask >> 1);
+		if (ptr != ev)
+		  *ptr = *ev;
+		ptr++;
+	      }
+	      break;
 
-		  for (unsigned ix = 0; ix != numButtons; ix++)
-		    {
-		      bool down = (downMask >> ix) & 1;
-		      if (down != mapping[ix].down)
+	    case EV_SYN:
+	      {
+		unsigned changedMask = 0;
+		if (ev->code == SYN_DROPPED)
+		  {
+		    flags = PK_Resync;
+		    Inform ("dropped packets");
+		    for (unsigned ix = KEY_CNT; ix--;)
+		      if (keyState[ix])
+			keyState[ix] = -1;
+		  }
+		else if (ev->code == SYN_REPORT && flags != PK_None)
+		  {
+		    unsigned downMask = 0;
+		    unsigned overrideMask = 0;
+		    for (unsigned ix = 0; ix != numButtons; ix++)
+		      {
+			// Add hystersis for buttons with modifiers.
+			bool down = (keyState[mapping[ix].key] >= 0)
+			  && (!mapping[ix].mod
+			      || mapping[ix].down
+			      || (keyState[mapping[ix].mod] >= 0));
+
+			downMask |= unsigned (down) << ix;
+			if (mapping[ix].override && (down || mapping[ix].down))
+			  overrideMask |= 1 << mapping[ix].override;
+
+		      }
+		    downMask &= ~(overrideMask >> 1);
+
+		    changedMask = downMask;
+		    for (unsigned ix = 0; ix != numButtons; ix++)
+		      changedMask ^= unsigned (mapping[ix].down) << ix;
+		    flags = PK_None;
+		  }
+
+		if (changedMask)
+		  {
+		    // A mouse button changed, figure out what to report
+		    input_event bEvents[buttonHWM + 1];
+		    unsigned numBE = 0;
+
+		    for (unsigned ix = 0; ix != numButtons; ix++)
+		      if (changedMask & (1 << ix))
 			{
 			  // This button has changed state.
+			  bool down = !mapping[ix].down;
 			  Verbose ("%s is %s", ButtonName (mapping[ix].mouse),
 				   down ? "pressed" : "released");
 			  mapping[ix].down = down;
-			  *out = *ev;
-			  out->type = EV_KEY;
-			  out->code = mapping[ix].mouse;
-			  out->value = down;
-			  out++;
+			  bEvents[numBE] = *ev;
+			  bEvents[numBE].type = EV_KEY;
+			  bEvents[numBE].code = mapping[ix].mouse;
+			  bEvents[numBE].value = down;
+			  numBE++;
+
 			  if (down)
-			    {
-			      // Hide the keys from downstream
-			      // consumers.
-			      *out = *ev;
-			      out->type = EV_KEY;
-			      out->code = mapping[ix].key;
-			      out->value = 0;
-			      out++;
-			      if (mapping[ix].mod)
-				{
-				  *out = *ev;
-				  out->type = EV_KEY;
-				  out->code = mapping[ix].mod;
-				  out->value = 0;
-				  out++;
-				}
-			    }
+			    // Unpress the activating keys
+			    for (auto *probe = base; probe != ptr; probe++)
+			      {
+				unsigned key = mapping[ix].key;
+				if (probe->code == key && probe->value)
+				  {
+				    probe->value = 0;
+				    if (mapping[ix].mod)
+				      probe->code = mapping[ix].mod;
+				    break;
+				  }
+			      }
 			}
-		    }
 
-		  if (out != eventsOut)
-		    {
-		      *out++ = *ev;
-		      int bytes = (out - eventsOut) * sizeof (*out);
-		      int cout = write (userfd, eventsOut, bytes);
-		      if (cout != bytes)
-			Inform ("unexpected byte count writing");
-		    }
+		    // Write in one or two blocks
+		    bEvents[numBE++] = *ev;
+		    if (unsigned count = (reinterpret_cast<char *> (ptr)
+					   - reinterpret_cast<char *> (base)))
+		      {
+			if (!bytes)
+			  {
+			    count += numBE * sizeof (bEvents[0]);
+			    memcpy (ptr, bEvents, numBE * sizeof (bEvents[0]));
+			    numBE = 0;
+			  }
+			write (userFd, base, count);
+		      }
 
-		  anyChanged = false;
-		}
+		    if (numBE)
+		      write (userFd, bEvents, numBE * sizeof (bEvents[0]));
+		  }
+		else
+		  {
+		    if (ev != ptr)
+		      *ptr = *ev;
+		    ptr++;
+		    unsigned count = (reinterpret_cast<char *> (ptr)
+				      - reinterpret_cast<char *> (base));
+		    write (userFd, base, count);
+		  }
+		base = ptr = next;
+	      }
 	    }
-	}      
+	}
+
+      if (unsigned bytes = (reinterpret_cast<char *> (ptr)
+			    - reinterpret_cast<char *> (base)))
+	write (userFd, base, bytes);
+
+      if (bytes < 0)
+	Inform ("unexpected byte count reading keyboard");
     }
 
-  return true;
+  return;
 }
 
 void Usage (FILE *stream = stderr)
@@ -748,25 +784,26 @@ int main (int argc, char *argv[])
     // get privileges back
     seteuid (euid);
 
-  int keyFd = FindKeyboard (keyboard);
-  if (keyFd < 0)
-    {
-      if (keyFd == -1)
-	{
-	  bool usingDefault = keyboard == keyboardName;
-	  Inform (usingDefault ? "cannot find keyboard%s%s"
-		  : "cannot find keyboard `%s'%s",
-		  usingDefault ? "" : keyboard,
-		  geteuid () ? " (not root, sudo?)" : "");
-	}
-      return 1;
-    }
+  int keyFd, devFd;
+  {
+    DeviceInfo info;
+    keyFd = FindKeyboard (&info, keyboard);
+    if (keyFd < 0)
+      {
+	if (keyFd == -1)
+	  {
+	    bool usingDefault = keyboard == keyboardName;
+	    Inform (usingDefault ? "cannot find keyboard%s%s"
+		    : "cannot find keyboard `%s'%s",
+		    usingDefault ? "" : keyboard,
+		    geteuid () ? " (not root, sudo?)" : "");
+	  }
+	return 1;
+      }
 
-  int devFd = -1;
-
-  if (InitKeyboard (keyFd))
-    devFd = InitDevice (device);
-
+    devFd = InitDevice (keyFd, &info, device);
+  }
+  
   if (issetuid)
     // and drop them again
     seteuid (uid);
@@ -777,6 +814,8 @@ int main (int argc, char *argv[])
 
       close (devFd);
     }
+
+  ioctl (keyFd, EVIOCGRAB, reinterpret_cast<void *> (0));
   close (keyFd);
 
   return 0;
