@@ -130,7 +130,7 @@ void Inform (char const *fmt, ...) {
 }
 
 #define Verbose(fmt, ...)						\
-  (flagVerbose ? Inform (fmt __VA_OPT__(, __VA_ARGS__)) : void(0))
+  (flagVerbose ? Inform (fmt __VA_OPT__ (,) __VA_ARGS__) : void (0))
 
 char const *KeyName (unsigned code, KeyName const *key = keys)
 {
@@ -452,7 +452,7 @@ int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
       goto fail;
 
   uinput_user_dev udev;  
-#if __GCC__ && !__clang__
+#if __GNUC__ && !__clang__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 #endif
