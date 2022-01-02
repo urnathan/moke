@@ -72,11 +72,11 @@ picked up when the X server starts.
 > xinput
 ⎡ Virtual core pointer                    	id=2	[master pointer  (3)]
 ...
-⎜   ↳ Moke Proxying AT Translated Set 2 keyboard	id=17	[slave  pointer  (2)]
+⎜   ↳ Moke proxying AT Translated Set 2 keyboard	id=17	[slave  pointer  (2)]
 ⎣ Virtual core keyboard                   	id=3	[master keyboard (2)]
     ...
     ↳ AT Translated Set 2 keyboard            	id=15	[slave  keyboard (3)]
-    ↳ Moke Proxying AT Translated Set 2 keyboard   	id=18	[slave  keyboard (3)]
+    ↳ Moke proxying AT Translated Set 2 keyboard   	id=18	[slave  keyboard (3)]
 
 ```
 
@@ -88,7 +88,7 @@ Available devices:
 ...
 /dev/input/event2:	AT Translated Set 2 keyboard
 ...
-/dev/input/event6:	Moke Proxying AT Translated Set 2 keyboard
+/dev/input/event6:	Moke proxying AT Translated Set 2 keyboard
 ```
 
 ## Usage

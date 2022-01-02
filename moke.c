@@ -34,7 +34,7 @@ auto const ulBits = sizeof (ul_t) * charBits;
 auto const &uinputDev = "/dev/uinput";
 auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
-auto const &deviceName = "Moke Proxying ";
+auto const &deviceName = "Moke proxying ";
 
 struct KeyName 
 {
@@ -263,14 +263,21 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
     }
 
   // Must generate EV_KEY and not generate non-keyboard-like events
-  if (!(typeMask & (1u << EV_KEY))
-      || (typeMask & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
-		       | (1u << EV_REP) | (1u << EV_LED))))
+  char const *whyNot = nullptr;
+  if (!(typeMask & (1u << EV_KEY)))
     {
+      whyNot = "does not generate Key events";
     not_keyboard:
       if (!dir || wantedName)
-	Verbose ("rejecting `%s' (%s): not a keyboard", fName, devName);
+	Verbose ("rejecting `%s' (%s): not a keyboard, %s", fName, devName,
+		 whyNot);
       return IK_Not;
+    }
+  if (typeMask & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
+		   | (1u << EV_REP) | (1u << EV_LED)))
+    {
+      whyNot = "generates non-keyboard events";
+      goto not_keyboard;
     }
 
   ul_t keyMask[(KEY_CNT + ulBits - 1) / ulBits];
@@ -280,13 +287,16 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
 
   // Check some usual keyboard keys are generated
   static unsigned char const someKeys[]
-    = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P,
-    KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L,
-    KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M,
+    = {KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
+    KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
+    KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
     0};
   for (unsigned char const *keyPtr = someKeys; *keyPtr; keyPtr++)
     if (!TestBit (keyMask, *keyPtr))
-      goto not_keyboard;
+      {
+	whyNot = "does not generate letter keys";
+	goto not_keyboard;
+      }
 
   if (wantedName && wantedName[0])
     {
