@@ -251,7 +251,7 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
   if (devLen > sizeof (devName) || !devLen || devName[devLen-1])
     {
       if (!dir || wantedName)
-	Verbose ("rejecting `%s': name badly formed", fName);
+	Inform ("rejecting `%s': name badly formed", fName);
       return IK_Not;
     }
   devLen--; // Make it the usual len we care about
@@ -261,42 +261,6 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
       Inform ("already present at `%s/%s'", dir, fName);
       return IK_Moke;
     }
-
-  // Must generate EV_KEY and not generate non-keyboard-like events
-  char const *whyNot = nullptr;
-  if (!(typeMask & (1u << EV_KEY)))
-    {
-      whyNot = "does not generate Key events";
-    not_keyboard:
-      if (!dir || wantedName)
-	Verbose ("rejecting `%s' (%s): not a keyboard, %s", fName, devName,
-		 whyNot);
-      return IK_Not;
-    }
-  if (typeMask & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
-		   | (1u << EV_REP) | (1u << EV_LED)))
-    {
-      whyNot = "generates non-keyboard events";
-      goto not_keyboard;
-    }
-
-  ul_t keyMask[(KEY_CNT + ulBits - 1) / ulBits];
-  memset (keyMask, 0, sizeof (keyMask));
-  if (ioctl (fd, EVIOCGBIT (EV_KEY, KEY_CNT), keyMask) < 0)
-    goto not_evio;
-
-  // Check some usual keyboard keys are generated
-  static unsigned char const someKeys[]
-    = {KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
-    KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
-    KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
-    0};
-  for (unsigned char const *keyPtr = someKeys; *keyPtr; keyPtr++)
-    if (!TestBit (keyMask, *keyPtr))
-      {
-	whyNot = "does not generate letter keys";
-	goto not_keyboard;
-      }
 
   if (wantedName && wantedName[0])
     {
@@ -327,6 +291,42 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
 	}
     }
 
+  // Must generate EV_KEY and not generate non-keyboard-like events
+  char const *whyNot = nullptr;
+  if (!(typeMask & (1u << EV_KEY)))
+    {
+      whyNot = "does not generate Key events";
+    not_keyboard:
+      if (!dir || wantedName)
+	Inform ("rejecting `%s' (%s): not a keyboard, %s", fName, devName,
+		whyNot);
+      return IK_Not;
+    }
+  if (typeMask & ~((1u << EV_KEY) | (1u << EV_SYN) | (1u << EV_MSC)
+		   | (1u << EV_REP) | (1u << EV_LED)))
+    {
+      whyNot = "generates non-keyboard events";
+      goto not_keyboard;
+    }
+
+  ul_t keyMask[(KEY_CNT + ulBits - 1) / ulBits];
+  memset (keyMask, 0, sizeof (keyMask));
+  if (ioctl (fd, EVIOCGBIT (EV_KEY, KEY_CNT), keyMask) < 0)
+    goto not_evio;
+
+  // Check some usual keyboard keys are generated
+  static unsigned char const someKeys[]
+    = {KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
+    KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
+    KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+    0};
+  for (unsigned char const *keyPtr = someKeys; *keyPtr; keyPtr++)
+    if (!TestBit (keyMask, *keyPtr))
+      {
+	whyNot = "does not generate letter keys";
+	goto not_keyboard;
+      }
+
   if (!dir || wantedName)
     Verbose ("found keyboard `%s' (%s)", fName, devName);
 
@@ -335,8 +335,8 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
       if (auto key = (&mapping[ix].key)[jx])
 	if (!TestBit (keyMask, key))
 	  {
-	    Inform ("keyboard does not generate %s (code %d)",
-		    KeyName (key), key);
+	    Inform ("keyboard `%s' (%s) does not generate %s (code %d)",
+		     fName, devName, KeyName (key), key);
 	    return IK_Bad;
 	  }
 
