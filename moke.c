@@ -433,16 +433,6 @@ int FindKeyboard (DeviceInfo *info, char const *wanted)
 
 int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
 {
-  // We need to grab, as we're filtering keypresses.  Fortunately
-  // we'll automatically ungrab when we terminate, by whatever
-  // mechanism.
-  int rc = ioctl (keyFd, EVIOCGRAB, reinterpret_cast<void *> (1));
-  if (rc < 0)
-    {
-      Inform ("keyboard is grabbed by another process");
-      return -1;
-    }
-
   int fd = open (name, O_WRONLY);
   if (fd < 0)
     {
@@ -461,7 +451,8 @@ int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
     if (TestBit (info->keyMask, ix) && ioctl (fd, UI_SET_KEYBIT, ix) < 0)
       goto fail;
 
-  uinput_user_dev udev;  
+  uinput_user_dev udev;
+  memset (&udev, 0, sizeof (udev));
 #if __GNUC__ && !__clang__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
@@ -483,6 +474,17 @@ int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
 
   if (ioctl (fd, UI_DEV_CREATE) < 0)
     goto fail;
+
+  // We need to grab, as we're filtering keypresses.  Fortunately
+  // we'll automatically ungrab when we terminate, by whatever
+  // mechanism.
+  int rc = ioctl (keyFd, EVIOCGRAB, reinterpret_cast<void *> (1));
+  if (rc < 0)
+    {
+      Inform ("keyboard is grabbed by another process");
+      close (fd);
+      return -1;
+    }
 
   return fd;
 }
