@@ -357,7 +357,7 @@ int FindKeyboard (DeviceInfo *info, char const *wanted)
   bool ok = true;
 
   bool isPathname = wanted[wanted[0] == '.'] == '/';
-  if (isPathname || !strchr (wanted, ' '))
+  if (isPathname || (wanted[0] && !strchr (wanted, ' ')))
     {
       fd = openat (dirfd, wanted, O_RDONLY, 0);
       if (fd < 0)
