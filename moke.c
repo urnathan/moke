@@ -297,7 +297,7 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
     {
       whyNot = "does not generate Key events";
     not_keyboard:
-      if (!dir || wantedName)
+      if (!dir || (flagVerbose && wantedName))
 	Inform ("rejecting `%s' (%s): not a keyboard, %s", fName, devName,
 		whyNot);
       return IK_Not;
