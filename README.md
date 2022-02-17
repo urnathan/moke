@@ -39,7 +39,7 @@ situated just above the touchpad. Plus I never use it as the LeftMeta
 that it is treated as in Linux. So why not use that as LeftButton?  I
 can't just use the similarly convenient Left- and RightAlt keys for
 the other two mouse buttons, as Alt itself is needed.  But chords of
-Windows+LeftAlt and Windows+RightAlt seem a useful combination.
+Windows+LeftAlt and Windows+RightAlt seem useful combinations.
 
 Remapping those keys using the keymap wouldn't quite work.  I need to
 distinguish the different Alt keys, and UIs would still think the Alt
@@ -94,7 +94,7 @@ Available devices:
 ## Usage
 
 ```shell
-moke [OPTIONS] [KEYBOAD]
+moke [OPTIONS] [KEYBOARD]
 ```
 
 KEYBOARD is either a pathname or a partial string match of the
@@ -150,9 +150,9 @@ RightCtrl, LeftMeta, Alt_L, Ctrl_L, Super_L, Alt_R, Ctrl_R.
 If no KEYBOARD argument is provided, a default of ` keyboard$` is
 used. As explained above this is anchored to the end of the device's
 name.<a href="#1"><sup>1</sup></a> To provide an empty partial name,
-and avoid the default, use an empty string for the argument (`''`),
-but that is very unlikely to work as many input devices generate key
-presses.
+and avoid the default, use an empty string for the argument (`''`). As
+Moke also requires the keyboard to emit alphabetic keys, that can be
+sufficient.
 
 If no `-l`, `-m` or `-r` options are given, a default mapping is
 provided:
