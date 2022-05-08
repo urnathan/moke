@@ -9,8 +9,8 @@
 #include "mokecfg.h"
 // C
 #include <stdarg.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 // OS
@@ -20,13 +20,13 @@
 #include <linux/uinput.h>
 #include <sys/types.h>
 
-namespace 
+namespace
 {
 #if __CHAR_BIT__
 unsigned const charBits = __CHAR_BIT__;
 #else
 unsigned const charBits = 8; // 'cos it is, isn't it
-#endif  
+#endif
 
 using ul_t = unsigned long;
 auto const ulBits = sizeof (ul_t) * charBits;
@@ -36,7 +36,7 @@ auto const &inputDevDir = "/dev/input";
 auto const &keyboardName = " keyboard$";
 auto const &deviceName = "Moke proxying ";
 
-struct KeyName 
+struct KeyName
 {
   unsigned key;
   char const *name;
@@ -44,33 +44,27 @@ struct KeyName
 
 // There are only a few keys that can be used
 constexpr KeyName const keys[]
-= {
-  {KEY_LEFTMETA, "Windows"},
-  {KEY_LEFTALT, "LeftAlt"},
-  {KEY_RIGHTALT, "RightAlt"},
-  {KEY_LEFTCTRL, "LeftCtrl"},
-  {KEY_RIGHTCTRL, "RightCtrl"},
+  = {{KEY_LEFTMETA, "Windows"},
+     {KEY_LEFTALT, "LeftAlt"},
+     {KEY_RIGHTALT, "RightAlt"},
+     {KEY_LEFTCTRL, "LeftCtrl"},
+     {KEY_RIGHTCTRL, "RightCtrl"},
 
-  {KEY_LEFTMETA, "LeftMeta"},
-  {KEY_LEFTALT, "Alt_L"},
-  {KEY_LEFTCTRL, "Ctrl_L"},
-  {KEY_LEFTMETA, "Super_L"},
-  {KEY_RIGHTALT, "Alt_R"},
-  {KEY_RIGHTCTRL, "Ctrl_R"},
+     {KEY_LEFTMETA, "LeftMeta"},
+     {KEY_LEFTALT, "Alt_L"},
+     {KEY_LEFTCTRL, "Ctrl_L"},
+     {KEY_LEFTMETA, "Super_L"},
+     {KEY_RIGHTALT, "Alt_R"},
+     {KEY_RIGHTCTRL, "Ctrl_R"},
 
-  {0, nullptr}};
-}
+     {0, nullptr}};
 
 constexpr KeyName const buttons[]
-= {
-  {BTN_LEFT, "LeftMouse"},
-  {BTN_MIDDLE, "MiddleMouse"},
-  {BTN_RIGHT, "RightMouse"},
-  {0, nullptr},
-};
+  = {{BTN_LEFT, "LeftMouse"},
+     {BTN_MIDDLE, "MiddleMouse"},
+     {BTN_RIGHT, "RightMouse"},
+     {0, nullptr}};
 
-namespace
-{
 char const *progName = "";
 bool flagVerbose = false;
 
@@ -88,39 +82,32 @@ signed char keyState[KEY_CNT];
 struct Map
 {
   unsigned short mouse; // the mouse BTN to emit
-  unsigned short key;  // the keyboard KEY we want
-  unsigned short mod;  // keyboard modifier, if any
+  unsigned short key;   // the keyboard KEY we want
+  unsigned short mod;   // keyboard modifier, if any
 
   char override; // overrides a non-modified button
-  bool down; // whether we consider this pressed
+  bool down;     // whether we consider this pressed
 };
 
 auto const buttonHWM = 6;
 unsigned numButtons = 0;
 Map mapping[buttonHWM]
-= {
-  {BTN_LEFT, KEY_LEFTMETA, 0, 0, false},
-  {BTN_MIDDLE, KEY_LEFTMETA, KEY_LEFTALT, 0, false},
-  {BTN_RIGHT, KEY_RIGHTCTRL, 0, 0, false},
-  {BTN_MIDDLE, KEY_RIGHTCTRL, KEY_RIGHTALT, 0, false},
-};
+  = {{BTN_LEFT, KEY_LEFTMETA, 0, 0, false},
+     {BTN_MIDDLE, KEY_LEFTMETA, KEY_LEFTALT, 0, false},
+     {BTN_RIGHT, KEY_RIGHTCTRL, 0, 0, false},
+     {BTN_MIDDLE, KEY_RIGHTCTRL, KEY_RIGHTALT, 0, false}};
 
-}
-
-namespace 
-{
-template<typename T>
-constexpr bool TestBit (T const *bits, unsigned n)
+template <typename T>
+constexpr bool
+TestBit (T const *bits, unsigned n)
 {
   return (bits[n / (sizeof (T) * charBits)]
 	  >> (n & (sizeof (T) * charBits - 1))) & 1;
 }
 
-}
-
-namespace 
+void
+Inform (char const *fmt, ...)
 {
-void Inform (char const *fmt, ...) {
   va_list args;
   fprintf (stderr, "%s:", progName);
   va_start (args, fmt);
@@ -132,7 +119,8 @@ void Inform (char const *fmt, ...) {
 #define Verbose(fmt, ...)						\
   (flagVerbose ? Inform (fmt __VA_OPT__ (,) __VA_ARGS__) : void (0))
 
-char const *KeyName (unsigned code, KeyName const *key = keys)
+char const *
+KeyName (unsigned code, KeyName const *key = keys)
 {
   for (; key->key; key++)
     if (key->key == code)
@@ -140,12 +128,14 @@ char const *KeyName (unsigned code, KeyName const *key = keys)
   return nullptr;
 }
 
-char const *ButtonName (unsigned code)
+char const *
+ButtonName (unsigned code)
 {
   return KeyName (code, buttons);
 }
 
-unsigned KeyCode (char const *name)
+unsigned
+KeyCode (char const *name)
 {
   for (auto *key = keys; key->key; key++)
     if (!strcasecmp (name, key->name))
@@ -153,7 +143,8 @@ unsigned KeyCode (char const *name)
   return 0;
 }
 
-bool ParseMapping (unsigned button, char *opt)
+bool
+ParseMapping (unsigned button, char *opt)
 {
   if (numButtons == buttonHWM)
     {
@@ -188,7 +179,8 @@ bool ParseMapping (unsigned button, char *opt)
   return true;
 }
 
-bool InitMapping ()
+bool
+InitMapping ()
 {
   if (!numButtons)
     // Use the default buttons
@@ -223,10 +215,17 @@ bool InitMapping ()
 
 // See if FD is the keyboard we want.  Must match wanted and accept
 // key events.
-enum IKC {IK_Not, IK_Moke, IK_OK, IK_Bad};
+enum IKC
+{
+  IK_Not,
+  IK_Moke,
+  IK_OK,
+  IK_Bad
+};
 
-IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
-		char const *wantedName = nullptr)
+IKC
+IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
+	    char const *wantedName = nullptr)
 {
   int version;
   if (ioctl (fd, EVIOCGVERSION, &version) < 0)
@@ -248,7 +247,7 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
 
   // The name length includes the trailing NUL, check it
   unsigned devLen = unsigned (sDevLen);
-  if (devLen > sizeof (devName) || !devLen || devName[devLen-1])
+  if (devLen > sizeof (devName) || !devLen || devName[devLen - 1])
     {
       if (!dir || wantedName)
 	Inform ("rejecting `%s': name badly formed", fName);
@@ -317,9 +316,9 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
   // Check some usual keyboard keys are generated
   static unsigned char const someKeys[]
     = {KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
-    KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
-    KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
-    0};
+       KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
+       KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+       0};
   for (unsigned char const *keyPtr = someKeys; *keyPtr; keyPtr++)
     if (!TestBit (keyMask, *keyPtr))
       {
@@ -350,7 +349,8 @@ IKC IsKeyboard (DeviceInfo *info, int fd, char const *dir, char const *fName,
 // @parm(wanted) either filename in input dir, or name fragment.
 // Fragment can be anchored at start with ^ or end with $, but it is
 // not a regexp.
-int FindKeyboard (DeviceInfo *info, char const *wanted)
+int
+FindKeyboard (DeviceInfo *info, char const *wanted)
 {
   int fd = -1;
   int dirfd = open (inputDevDir, O_RDONLY | O_DIRECTORY);
@@ -431,7 +431,8 @@ int FindKeyboard (DeviceInfo *info, char const *wanted)
   return fd;
 }
 
-int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
+int
+InitDevice (int keyFd, DeviceInfo const *info, char const *name)
 {
   int fd = open (name, O_WRONLY);
   if (fd < 0)
@@ -463,7 +464,7 @@ int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
 #pragma GCC diagnostic pop
 #endif
   udev.id.bustype = BUS_VIRTUAL;
-  udev.id.vendor  = 21324; // Julian Day 2021-11-20
+  udev.id.vendor = 21324; // Julian Day 2021-11-20
   udev.id.product = 0x1;
   unsigned vmaj, vmin;
   sscanf (PROJECT_VERSION, "%u.%u", &vmaj, &vmin);
@@ -489,9 +490,15 @@ int InitDevice (int keyFd, DeviceInfo const *info, char const *name)
   return fd;
 }
 
-void Loop (int keyFd, int userFd)
+void
+Loop (int keyFd, int userFd)
 {
-  enum PKF {PK_None, PK_Changed, PK_Resync};
+  enum PKF
+  {
+    PK_None,
+    PK_Changed,
+    PK_Resync
+  };
   auto flags = PK_None;
 
   constexpr unsigned maxInEv = 8;
@@ -614,7 +621,7 @@ void Loop (int keyFd, int userFd)
 		    // Write in one or two blocks
 		    bEvents[numBE++] = *ev;
 		    if (unsigned count = (reinterpret_cast<char *> (ptr)
-					   - reinterpret_cast<char *> (base)))
+					  - reinterpret_cast<char *> (base)))
 		      {
 			if (!bytes)
 			  {
@@ -642,8 +649,8 @@ void Loop (int keyFd, int userFd)
 	    }
 	}
 
-      if (unsigned bytes = (reinterpret_cast<char *> (ptr)
-			    - reinterpret_cast<char *> (base)))
+      if (unsigned bytes
+	  = (reinterpret_cast<char *> (ptr) - reinterpret_cast<char *> (base)))
 	write (userFd, base, bytes);
 
       if (bytes < 0)
@@ -653,7 +660,8 @@ void Loop (int keyFd, int userFd)
   return;
 }
 
-void Usage (FILE *stream = stderr)
+void
+Usage (FILE *stream = stderr)
 {
   fprintf (stream, R"(Moke: Mouse Buttons From Keyboard
   Usage: %s [OPTIONS] [KEYBOARD] [DEVICE]
@@ -689,7 +697,8 @@ specified, the default mapping is:
 
    -l Windows -m Windows+LeftAlt -m RightCtrl+RightAlt -r RightCtrl
 
-Known keys are)", progName, inputDevDir, inputDevDir, uinputDev, inputDevDir);
+Known keys are)",
+	   progName, inputDevDir, inputDevDir, uinputDev, inputDevDir);
   for (unsigned ix = 0; keys[ix].name; ix++)
     fprintf (stream, "%s %s", &","[!ix], keys[ix].name);
 
@@ -701,9 +710,10 @@ Usually requires root privilege, as we muck about in /dev.
   if (PROJECT_URL[0])
     fprintf (stream, "See %s for more information.\n", PROJECT_URL);
 }
-}
+} // namespace
 
-int main (int argc, char *argv[])
+int
+main (int argc, char *argv[])
 {
   uid_t uid = getuid ();
   uid_t euid = geteuid ();
@@ -735,18 +745,16 @@ int main (int argc, char *argv[])
 	}
       else
 	{
-	  struct Opts 
+	  struct Opts
 	  {
 	    unsigned short button;
 	    char opt[2];
 	  };
-	  static Opts const opts[] =
-	    {
-	      {BTN_LEFT, {'-', 'l'}},
-	      {BTN_MIDDLE, {'-', 'm'}},
-	      {BTN_RIGHT, {'-', 'r'}},
-	      {0, {0, 0}},
-	    };
+	  static Opts const opts[]
+	    = {{BTN_LEFT, {'-', 'l'}},
+	       {BTN_MIDDLE, {'-', 'm'}},
+	       {BTN_RIGHT, {'-', 'r'}},
+	       {0, {0, 0}}};
 	  for (unsigned ix = 0; opts[ix].button; ix++)
 	    if (!strncmp (arg, opts[ix].opt, 2))
 	      {
@@ -806,7 +814,7 @@ int main (int argc, char *argv[])
 	  {
 	    bool usingDefault = keyboard == keyboardName;
 	    Inform (usingDefault ? "cannot find keyboard%s%s"
-		    : "cannot find keyboard `%s'%s",
+ 		                 : "cannot find keyboard `%s'%s",
 		    usingDefault ? "" : keyboard,
 		    geteuid () ? " (not root, sudo?)" : "");
 	  }
@@ -815,7 +823,7 @@ int main (int argc, char *argv[])
 
     devFd = InitDevice (keyFd, &info, device);
   }
-  
+
   if (issetuid)
     // and drop them again
     seteuid (uid);
